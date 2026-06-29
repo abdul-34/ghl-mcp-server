@@ -147,6 +147,34 @@ docker compose up --build
 - Dashboard → http://localhost:3000
 - MCP server → http://localhost:8000
 
+### 4. Create your agency account, then lock down sign-up
+
+The dashboard uses **Supabase Auth**. Out of the box, Supabase allows **open
+public sign-up**, which means anyone who can reach your dashboard URL could
+create an account. They would **only ever get their own empty workspace** —
+Row Level Security walls every agency off from the others, so a stranger can
+never see your sub-accounts, tokens, or links — but for a single-agency
+deployment you almost certainly want to turn sign-up off entirely.
+
+Recommended one-time setup:
+
+1. Create your own account. Either:
+   - **Supabase → Authentication → Users → Add user** (tick *Auto Confirm User*
+     so no email is needed), **or**
+   - sign in on the dashboard with the credentials you created above.
+2. **Disable public sign-up:** Supabase → **Authentication → Sign In / Providers**
+   → turn **off "Allow new users to sign up."**
+3. (Optional) **Email confirmation** is controlled by the **"Confirm email"**
+   toggle on the same Email provider page. If you auto-confirmed your user in
+   step 1 you can leave this off and skip email entirely. If you keep it on for
+   production, configure **custom SMTP** under **Authentication → Emails →
+   SMTP Settings** — Supabase's built-in email is rate-limited and meant only
+   for testing.
+
+> The login page is **sign-in only** — there is no sign-up button. Accounts are
+> provisioned by you (the agency owner) in Supabase. This keeps the deployment
+> single-tenant in practice even though the underlying schema is multi-tenant.
+
 ---
 
 ## Deploy to Render (both services, one Blueprint)
@@ -192,6 +220,8 @@ Revoke a link any time from the dashboard — access stops immediately.
 
 | Concern | Mechanism |
 | --- | --- |
+| No unwanted accounts | Public sign-up disabled in Supabase; owner provisions users |
+| Agencies can't see each other's data | Supabase RLS isolates every row by `owner_id` |
 | Only the agency can write tokens | Supabase Auth + RLS (`owner_id = auth.uid()`) |
 | Client URLs can't be guessed | 256-bit random secret in the URL |
 | DB leak doesn't expose live URLs | only `sha256(secret)` is stored |
