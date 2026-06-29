@@ -1,0 +1,42 @@
+# CRM MCP — self-hosted stack
+#
+# Two services:
+#   mcp-server  — the Streamable HTTP MCP endpoint (/mcp/<link-token>)
+#   dashboard   — the agency UI for entering tokens and generating links
+#
+# Both read from the same Supabase project. Copy .env.example → .env and fill
+# in the values before running `docker compose up --build`.
+
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8000"
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_MCP_BASE_URL: ${NEXT_PUBLIC_MCP_BASE_URL}
+    environment:
+      # Server-side only — used to encrypt PITs. MUST match the MCP server.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      NEXT_PUBLIC_MCP_BASE_URL: ${NEXT_PUBLIC_MCP_BASE_URL}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mcp-server
+    restart: unless-stopped

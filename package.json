@@ -1,0 +1,57 @@
+{
+  "name": "ghl-mcp-server",
+  "version": "1.0.0",
+  "description": "Self-hosted, multi-sub-account MCP server for your CRM. Supabase-backed, per-link tokens, per-link tool selection.",
+  "author": "Abdulrehman Moaz <rehman@xylatorai.com> (https://www.xylatorai.com/)",
+  "homepage": "https://www.xylatorai.com/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abdul-34/ghl-mcp-server.git"
+  },
+  "license": "MIT",
+  "main": "dist/server.js",
+  "bin": {
+    "ghl-mcp-server": "dist/server.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "package.json"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "nodemon --exec ts-node src/http-server.ts",
+    "start": "node dist/http-server.js",
+    "start:stdio": "node dist/server.js",
+    "start:http": "node dist/http-server.js",
+    "prepublishOnly": "npm run build",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "crm",
+    "highlevel",
+    "supabase",
+    "self-hosted",
+    "api"
+  ],
+  "devDependencies": {
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "@types/cors": "^2.8.18",
+    "@types/express": "^5.0.2",
+    "@types/node": "^22.15.29",
+    "axios": "^1.9.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "typescript": "^5.8.3"
+  }
+}

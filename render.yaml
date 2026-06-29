@@ -1,0 +1,62 @@
+# Render Blueprint — deploys BOTH services from one file.
+#
+# In Render:  New +  →  Blueprint  →  pick this repo.
+# Render reads this file and creates both services at once. You'll be prompted
+# to fill in the values marked `sync: false` (secrets) during the first deploy.
+#
+# One manual step remains (see notes at the bottom).
+
+services:
+  # ── MCP server ──────────────────────────────────────────────────────────────
+  - type: web
+    name: ghl-mcp-server
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render injects PORT automatically; the server reads it.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+
+  # ── Dashboard (Next.js) ──────────────────────────────────────────────────────
+  - type: web
+    name: ghl-mcp-dashboard
+    runtime: docker
+    rootDir: dashboard
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /login
+    plan: free
+    autoDeploy: true
+    envVars:
+      # NEXT_PUBLIC_* are inlined at build time. Render passes env vars to the
+      # Docker build as build args (the Dockerfile declares matching ARGs).
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      # Must match the MCP server's ENCRYPTION_KEY (used at runtime by server actions).
+      - key: ENCRYPTION_KEY
+        sync: false
+      # Public URL of the MCP server. After the first deploy, copy the
+      # ghl-mcp-server URL (https://ghl-mcp-server-XXXX.onrender.com) and set it
+      # here, then trigger a manual redeploy of the dashboard so it's inlined.
+      - key: NEXT_PUBLIC_MCP_BASE_URL
+        sync: false
+
+# ── Notes ─────────────────────────────────────────────────────────────────────
+# 1. Run the SQL in supabase/migrations/0001_init.sql in your Supabase project
+#    (SQL Editor) once — Render does not manage your database.
+# 2. ENCRYPTION_KEY must be the SAME value on both services.
+# 3. NEXT_PUBLIC_MCP_BASE_URL is needed at build time, but the server's URL isn't
+#    known until its first deploy. So: deploy → grab the server URL → set it on
+#    the dashboard → redeploy the dashboard. (Only needed once.)

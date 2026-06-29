@@ -1,0 +1,9 @@
+// AUTO-GENERATED from HighLevel OpenAPI specs. Do not edit by hand.
+// Regenerate with: node scripts/generate-tools.mjs
+import { apiTool } from './_runtime.js';
+import { ToolDef } from '../types.js';
+
+export const surveysTools: ToolDef[] = [
+  apiTool({"name":"surveys_get_surveys_submissions","description":"Get Surveys Submissions [scope: surveys.readonly]","method":"GET","path":"/surveys/submissions","version":"2021-07-28","pathParams":[],"queryParams":["locationId","page","limit","surveyId","q","startAt","endAt"],"bodyParams":[],"inputSchema":{"type":"object","properties":{"locationId":{"type":"string"},"page":{"type":"number","description":"Page No. By default it will be 1"},"limit":{"type":"number","description":"Limit Per Page records count. will allow maximum up to 100 and default will be 20"},"surveyId":{"type":"string","description":"Filter submission by survey id"},"q":{"type":"string","description":"Filter by contactId, name, email or phone no."},"startAt":{"type":"string","description":"Get submission by starting of this date. By default it will be same date of last month(YYYY-MM-DD)."},"endAt":{"type":"string","description":"Get submission by ending of this date. By default it will be current date(YYYY-MM-DD)."}},"required":["locationId"],"additionalProperties":false}}),
+  apiTool({"name":"surveys_get_surveys","description":"Get Surveys [scope: surveys.readonly]","method":"GET","path":"/surveys/","version":"2021-07-28","pathParams":[],"queryParams":["locationId","skip","limit","type"],"bodyParams":[],"inputSchema":{"type":"object","properties":{"locationId":{"type":"string"},"skip":{"type":"number"},"limit":{"type":"number","description":"Limit Per Page records count. will allow maximum up to 50 and default will be 10"},"type":{"type":"string"}},"required":["locationId"],"additionalProperties":false}}),
+];
