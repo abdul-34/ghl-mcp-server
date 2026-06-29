@@ -289,14 +289,28 @@ To propose a change: fork → branch → commit → open a PR describing what an
 ### Abdulrehman Moaz — Founder, [XylatorAI](https://www.xylatorai.com/)
 
 Built and maintained by **Abdulrehman Moaz**, founder of
-**[XylatorAI](https://www.xylatorai.com/)** — custom CRM integrations & AI
-systems for agencies and SaaS builders.
+**[XylatorAI](https://www.xylatorai.com/about)** — a founder-led agency building
+custom CRM integrations and AI automation systems for agencies and SaaS builders.
+50+ custom integrations shipped, 40+ agencies served, 99%+ production uptime.
 
-- Website: **[xylatorai.com](https://www.xylatorai.com/)**
+**We can build for you:**
+
+- Marketplace apps (OAuth, multi-tenant, review-ready)
+- Custom conversation providers (SMS, WhatsApp, voice, iMessage)
+- Custom payment providers (branded checkout, invoices, subscriptions)
+- Workflow actions & triggers, third-party API integrations, and custom dashboards
+- Bespoke MCP / AI-agent integrations like this one
+
+**Links**
+
+- Services: **[xylatorai.com/services](https://www.xylatorai.com/services)**
+- About: **[xylatorai.com/about](https://www.xylatorai.com/about)**
+- Book a call: **[xylatorai.com/book-a-call](https://www.xylatorai.com/book-a-call)**
 - Contact: **rehman@xylatorai.com**
 
 Need a custom CRM marketplace app, conversation/payment provider, AI agent, or a
-bespoke MCP integration? [Book a call with XylatorAI](https://www.xylatorai.com/).
+bespoke MCP integration?
+[Book a 30-minute strategy call](https://www.xylatorai.com/book-a-call).
 
 ## License
 
