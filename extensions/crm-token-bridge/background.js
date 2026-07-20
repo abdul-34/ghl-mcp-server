@@ -23,6 +23,31 @@ async function getSettings() {
   };
 }
 
+// Continuously push the sniffed builder JWT to the agency-level endpoint (no
+// location context). Best-effort and silent when unconfigured — this is what
+// keeps the marketplace-discovery tools fresh without any manual step.
+async function postBuilderCapture(authToken) {
+  const { serverUrl, captureToken } = await getSettings();
+  if (!captureToken || !authToken) return false;
+
+  const response = await fetch(`${serverUrl}/capture/builder/${encodeURIComponent(captureToken)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Capture-Token': captureToken,
+    },
+    body: JSON.stringify({
+      authToken,
+      capturedAt: new Date().toISOString(),
+      source: 'crm-token-bridge-extension',
+    }),
+  });
+  if (response.ok) {
+    await chrome.storage.local.set({ lastBuilderPushAt: new Date().toISOString() });
+  }
+  return response.ok;
+}
+
 async function postCapture(payload) {
   const { serverUrl, captureToken } = await getSettings();
   if (!captureToken) {
@@ -83,9 +108,11 @@ function pickBearer(headers) {
   return null;
 }
 
-// Sniff the builder JWT from CRM requests and keep the latest locally. It has no
-// location context of its own, so it's never posted alone — only bundled with
-// the next Firebase capture.
+// Sniff the builder JWT from CRM API requests and, whenever it changes, push it
+// to the agency-level endpoint so the server always holds a fresh builder token.
+// GHL rotates this JWT ~hourly, so pushes are rare (deduped on the token value).
+// The GHL API hosts are NOT white-labeled, so this fires even when the agency's
+// CRM app runs on a custom domain.
 chrome.webRequest.onBeforeSendHeaders.addListener(
   (details) => {
     if (!isInterestingUrl(details.url)) return;
@@ -98,6 +125,11 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
         lastBuilderToken: token,
         lastBuilderTokenAt: new Date().toISOString(),
       });
+      try {
+        await postBuilderCapture(token);
+      } catch {
+        // best-effort — the token is still stored locally for the next Firebase capture
+      }
     });
   },
   {
@@ -140,8 +172,11 @@ async function captureActiveTab() {
     throw new Error('No active CRM tab found.');
   }
 
-  if (!isInterestingUrl(tab.url) && !/gohighlevel\.com|leadconnectorhq\.com/.test(tab.url)) {
-    throw new Error('Open a CRM app tab (gohighlevel / leadconnectorhq) first.');
+  // No hostname gate: most HighLevel agencies are fully white-labeled and run the
+  // CRM on their own custom domain. We read the Firebase IndexedDB from whatever
+  // tab is active and rely on that read (below) to confirm it's a CRM session.
+  if (!/^https?:/i.test(tab.url)) {
+    throw new Error('Open your CRM app tab (the logged-in HighLevel/white-label dashboard) first.');
   }
 
   const [{ result: firebaseResult }] = await chrome.scripting.executeScript({

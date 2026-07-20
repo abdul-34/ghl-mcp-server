@@ -112,6 +112,8 @@ export class WorkflowBuilderClient {
   private firebaseTokenExpiry: number = 0;
   /** Reuse auto-save session ids so back-to-back writes don't fight a pending commit lock. */
   private autoSaveSessions = new Map<string, string>();
+  /** Which auth the marketplace endpoint accepted (learned once per session). */
+  private marketplaceAuthMode: 'workflow' | 'builder' | null = null;
 
   private static readonly API_ORIGIN = 'https://backend.leadconnectorhq.com';
   private static readonly BUILDER_ORIGIN = 'https://client-app-automation-workflows.leadconnectorhq.com';
@@ -319,6 +321,51 @@ export class WorkflowBuilderClient {
     }
 
     return { status: res.status, data };
+  }
+
+  /** Extract the HTTP status embedded in a request() error message, if any. */
+  private parseStatus(err: unknown): number | undefined {
+    const m = err instanceof Error ? err.message.match(/API error (\d{3})\b/) : null;
+    return m ? Number(m[1]) : undefined;
+  }
+
+  /**
+   * Marketplace request with auth fallback. The marketplace endpoint may accept
+   * the durable Firebase token-id or require the agency builder JWT — we don't
+   * assume. Try Firebase first (self-renewing, per sub-account), fall back to the
+   * builder JWT on 401/403, and remember whichever mode worked for the session.
+   */
+  private async requestMarketplace<T = unknown>(path: string): Promise<{ status: number; data: T }> {
+    const hasFirebase = Boolean(this.config.firebaseApiKey && this.config.firebaseRefreshToken);
+    const hasBuilder = Boolean(this.config.authToken || this.config.refreshToken);
+
+    if (this.marketplaceAuthMode) {
+      return this.request<T>('GET', path, undefined, this.marketplaceAuthMode);
+    }
+
+    const order: Array<'workflow' | 'builder'> = [];
+    if (hasFirebase) order.push('workflow');
+    if (hasBuilder) order.push('builder');
+    if (order.length === 0) {
+      // Neither available — let the builder path throw its standard "no creds" error.
+      return this.request<T>('GET', path, undefined, 'builder');
+    }
+
+    let lastErr: unknown;
+    for (let i = 0; i < order.length; i++) {
+      try {
+        const res = await this.request<T>('GET', path, undefined, order[i]);
+        this.marketplaceAuthMode = order[i]; // remember the mode that worked
+        return res;
+      } catch (err) {
+        lastErr = err;
+        const status = this.parseStatus(err);
+        const isAuthError = status === 401 || status === 403;
+        const hasNext = i < order.length - 1;
+        if (!isAuthError || !hasNext) throw err;
+      }
+    }
+    throw lastErr;
   }
 
   // ─── API Methods ────────────────────────────────────────
@@ -585,11 +632,8 @@ export class WorkflowBuilderClient {
       isInstalled: String(options.isInstalled ?? true),
       query: options.query?.trim() || 'null',
     });
-    const { data } = await this.request<unknown[]>(
-      'GET',
-      `/marketplace/core/search/module?${query.toString()}`,
-      undefined,
-      'builder'
+    const { data } = await this.requestMarketplace<unknown[]>(
+      `/marketplace/core/search/module?${query.toString()}`
     );
     return Array.isArray(data) ? data : [];
   }

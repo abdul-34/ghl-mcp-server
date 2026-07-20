@@ -214,6 +214,46 @@ export async function updateWorkflowCreds(subaccountId: string, patch: WorkflowC
   }
 }
 
+/** The agency-wide builder JWT (+ optional refresh token), decrypted. */
+export interface AgencyBuilderToken {
+  authToken?: string;
+  refreshToken?: string;
+}
+
+/** Load and decrypt the agency-level builder token for an owner. */
+export async function loadAgencyBuilderToken(ownerId: string): Promise<AgencyBuilderToken | undefined> {
+  const { data, error } = await getSupabase()
+    .from('agency_builder_tokens')
+    .select('auth_encrypted_token, auth_encrypted_refresh_token')
+    .eq('owner_id', ownerId)
+    .maybeSingle();
+
+  if (error || !data) return undefined;
+  const authToken = tryDecrypt(data.auth_encrypted_token, 'agency builder token', ownerId);
+  const refreshToken = tryDecrypt(data.auth_encrypted_refresh_token, 'agency builder refresh token', ownerId);
+  if (!authToken && !refreshToken) return undefined;
+  return { authToken, refreshToken };
+}
+
+/** Upsert the agency-level builder token (encrypted). Only overwrites fields present in `patch`. */
+export async function storeAgencyBuilderToken(
+  ownerId: string,
+  patch: { authToken?: string; refreshToken?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  const row: Record<string, unknown> = { owner_id: ownerId, updated_at: new Date().toISOString() };
+  if (patch.authToken) row.auth_encrypted_token = encryptToken(patch.authToken);
+  if (patch.refreshToken) row.auth_encrypted_refresh_token = encryptToken(patch.refreshToken);
+
+  const { error } = await getSupabase()
+    .from('agency_builder_tokens')
+    .upsert(row, { onConflict: 'owner_id' });
+  if (error) {
+    console.error(`[supabase-store] Failed to store agency builder token for ${ownerId}:`, error.message);
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
+
 /** Resolve a raw capture-token secret to its owner. Returns null if no live match. */
 export async function resolveCaptureToken(rawSecret: string): Promise<{ tokenId: string; ownerId: string } | null> {
   if (!rawSecret) return null;

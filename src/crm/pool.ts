@@ -16,13 +16,25 @@ import {
   ResolvedLink,
   ResolvedLocation,
   ResolvedWorkflowCreds,
+  AgencyBuilderToken,
   loadLocationsForLink,
+  loadAgencyBuilderToken,
   updateWorkflowCreds,
+  storeAgencyBuilderToken,
 } from '../db/supabase-store.js';
 
 export interface AccountSummary {
   locationId: string;
   name?: string;
+}
+
+export interface PoolOptions {
+  baseUrl?: string;
+  version?: string;
+  /** Agency owner — needed to persist rotated agency-level builder tokens. */
+  ownerId?: string;
+  /** Agency-wide builder JWT shared by all the owner's sub-accounts. */
+  agencyBuilder?: AgencyBuilderToken;
 }
 
 interface Account {
@@ -42,10 +54,14 @@ export class CRMClientPool {
   private readonly workflowClients = new Map<string, WorkflowBuilderClient>();
   private readonly baseUrl: string;
   private readonly version: string;
+  private readonly ownerId?: string;
+  private readonly agencyBuilder?: AgencyBuilderToken;
 
-  constructor(locations: ResolvedLocation[], options: { baseUrl?: string; version?: string } = {}) {
+  constructor(locations: ResolvedLocation[], options: PoolOptions = {}) {
     this.baseUrl = options.baseUrl || DEFAULT_BASE_URL;
     this.version = options.version || DEFAULT_VERSION;
+    this.ownerId = options.ownerId;
+    this.agencyBuilder = options.agencyBuilder;
 
     if (locations.length === 0) {
       throw new Error(
@@ -66,13 +82,16 @@ export class CRMClientPool {
     }
   }
 
-  static fromLocations(locations: ResolvedLocation[], options: { baseUrl?: string; version?: string } = {}): CRMClientPool {
+  static fromLocations(locations: ResolvedLocation[], options: PoolOptions = {}): CRMClientPool {
     return new CRMClientPool(locations, options);
   }
 
-  static async fromLink(link: ResolvedLink, options: { baseUrl?: string; version?: string } = {}): Promise<CRMClientPool> {
-    const locations = await loadLocationsForLink(link);
-    return new CRMClientPool(locations, options);
+  static async fromLink(link: ResolvedLink, options: PoolOptions = {}): Promise<CRMClientPool> {
+    const [locations, agencyBuilder] = await Promise.all([
+      loadLocationsForLink(link),
+      loadAgencyBuilderToken(link.ownerId),
+    ]);
+    return new CRMClientPool(locations, { ...options, ownerId: link.ownerId, agencyBuilder });
   }
 
   get(locationId: string): CRMClient {
@@ -114,25 +133,46 @@ export class CRMClientPool {
     if (!acct) {
       throw new Error(`Unknown sub-account locationId "${locationId}".`);
     }
-    if (!acct.workflow) {
+
+    const wf = acct.workflow;
+    // The builder JWT is agency-wide and kept fresh by the extension's continuous
+    // push; prefer it over any stale per-sub-account copy.
+    const authToken = this.agencyBuilder?.authToken || wf?.authToken;
+    const refreshToken = this.agencyBuilder?.refreshToken || wf?.refreshToken;
+
+    const hasFirebase = Boolean(wf?.firebaseApiKey && wf?.firebaseRefreshToken);
+    const hasBuilder = Boolean(authToken || refreshToken);
+    if (!hasFirebase && !hasBuilder) {
       throw new Error(
         `No workflow credentials captured for sub-account "${locationId}". Run the capture ` +
-          `extension against this location so the server can store its Firebase credentials.`
+          `extension against this location (Firebase creds for workflow CRUD, plus the agency ` +
+          `builder token for marketplace module discovery).`
       );
     }
 
     const subaccountId = acct.subaccountId;
+    const ownerId = this.ownerId;
+
     const client = new WorkflowBuilderClient({
       apiKey: acct.accessToken, // PIT — reused as the internal-API Bearer token.
-      firebaseApiKey: acct.workflow.firebaseApiKey || '',
-      firebaseRefreshToken: acct.workflow.firebaseRefreshToken || '',
-      authToken: acct.workflow.authToken,
-      refreshToken: acct.workflow.refreshToken,
+      firebaseApiKey: wf?.firebaseApiKey || '',
+      firebaseRefreshToken: wf?.firebaseRefreshToken || '',
+      authToken,
+      refreshToken,
       locationId: acct.locationId,
-      userId: acct.workflow.userId,
-      companyId: acct.workflow.companyId,
-      companyAge: acct.workflow.companyAge,
-      persist: (patch) => updateWorkflowCreds(subaccountId, patch),
+      userId: wf?.userId,
+      companyId: wf?.companyId,
+      companyAge: wf?.companyAge,
+      // Route rotated tokens: Firebase → the sub-account row; builder JWT → the
+      // agency row (shared across all the owner's sub-accounts).
+      persist: async (patch) => {
+        if (patch.firebaseRefreshToken) {
+          await updateWorkflowCreds(subaccountId, { firebaseRefreshToken: patch.firebaseRefreshToken });
+        }
+        if ((patch.authToken || patch.refreshToken) && ownerId) {
+          await storeAgencyBuilderToken(ownerId, { authToken: patch.authToken, refreshToken: patch.refreshToken });
+        }
+      },
     });
     this.workflowClients.set(locationId, client);
     return client;

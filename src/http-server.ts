@@ -28,6 +28,7 @@ import {
   ResolvedLink,
   resolveCaptureToken,
   storeCapturedWorkflowCreds,
+  storeAgencyBuilderToken,
   touchCaptureTokenUsed,
 } from './db/supabase-store.js';
 import { listTools, callTool, toolCount } from './tools/index.js';
@@ -236,6 +237,51 @@ class CRMMcpHttpServer {
     }
   };
 
+  /** Store the agency-wide builder JWT the extension sniffs from CRM requests. */
+  private handleBuilderCapture: express.RequestHandler = async (req, res) => {
+    const token = this.extractCaptureToken(req);
+    if (!token) {
+      res.status(401).json({ ok: false, error: 'Missing capture token.' });
+      return;
+    }
+
+    let owner: { tokenId: string; ownerId: string } | null;
+    try {
+      owner = await resolveCaptureToken(token);
+    } catch (err) {
+      console.error('[CAPTURE] builder token lookup failed', err);
+      res.status(500).json({ ok: false, error: 'Capture token lookup failed.' });
+      return;
+    }
+    if (!owner) {
+      res.status(401).json({ ok: false, error: 'Invalid or revoked capture token.' });
+      return;
+    }
+
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    const authToken = typeof body.authToken === 'string' ? body.authToken : undefined;
+    const refreshToken = typeof body.refreshToken === 'string' ? body.refreshToken : undefined;
+    if (!authToken && !refreshToken) {
+      res.status(400).json({ ok: false, error: 'No builder token found to store.' });
+      return;
+    }
+
+    try {
+      const result = await storeAgencyBuilderToken(owner.ownerId, { authToken, refreshToken });
+      if (!result.ok) {
+        res.status(500).json({ ok: false, error: 'Failed to store builder token.' });
+        return;
+      }
+      void touchCaptureTokenUsed(owner.tokenId);
+      res.json({ ok: true, summary: { storedBuilderToken: Boolean(authToken), storedRefreshToken: Boolean(refreshToken) } });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      const safe = raw.replace(/Bearer\s+[^\s"']+/gi, 'Bearer ***');
+      console.error('[CAPTURE] builder store failed:', safe);
+      res.status(500).json({ ok: false, error: 'Failed to store builder token.' });
+    }
+  };
+
   /** Build a fresh MCP Server bound to one session's pool + link. */
   private buildMcpServer(pool: CRMClientPool, link: ResolvedLink): Server {
     const server = new Server(
@@ -286,6 +332,12 @@ class CRMMcpHttpServer {
     // agency owner; the harvested Firebase creds are stored on that owner's
     // sub-account matching the posted locationId. The sub-account (with its PIT)
     // must already exist — we never create one here.
+    // Agency-wide builder JWT: pushed continuously by the extension on every CRM
+    // request (no locationId — it's shared across the owner's sub-accounts).
+    // Registered before /capture/:token so it isn't shadowed.
+    for (const builderPath of ['/capture/builder', '/capture/builder/:token']) {
+      this.app.post(builderPath, this.handleBuilderCapture);
+    }
     for (const capturePath of ['/capture', '/capture/:token']) {
       this.app.post(capturePath, this.handleCapture);
     }
