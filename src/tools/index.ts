@@ -20,9 +20,29 @@ import {
   executeAccountsTool,
   isAccountsTool,
 } from './accounts.js';
+import { workflowBuilderTools } from './workflow-builder.js';
+import { workflowPublicTools } from './workflow-public.js';
+import { workflowInsightsTools } from './workflow-insights.js';
+import { portedTools } from './ported/index.js';
+import {
+  gatewayToolDefinitions,
+  isGatewayTool,
+  searchTools,
+  categoryOf,
+  ToolIndexEntry,
+} from './gateway.js';
 import { isToolAllowed } from './tool-filter.js';
 
-const OPERATION_DEFS: ToolDef[] = [...GENERATED_TOOLS];
+// Hand-written tools are additive: they extend the generated public-API tools
+// and never replace them. The registry throws on any duplicate name below, so a
+// collision surfaces as a build-time error rather than a silent overwrite.
+const OPERATION_DEFS: ToolDef[] = [
+  ...GENERATED_TOOLS,
+  ...workflowBuilderTools,
+  ...workflowPublicTools,
+  ...workflowInsightsTools,
+  ...portedTools,
+];
 
 const REGISTRY = new Map<string, ToolDef>();
 for (const def of OPERATION_DEFS) {
@@ -37,8 +57,21 @@ export function allToolDefinitions(): Tool[] {
   return [...accountsToolDefinitions, ...OPERATION_DEFS.map((d) => d.tool)];
 }
 
-/** Tools this link may expose, after applying its enabled-tools whitelist. */
-export function listTools(enabledTools: string[]): Tool[] {
+export interface ListOptions {
+  /** Gateway mode: expose only the account + gateway meta-tools, not the full list. */
+  gateway?: boolean;
+}
+
+/**
+ * Tools this link exposes. In gateway mode only the account-discovery tools and
+ * the three gateway meta-tools are returned (the ~700 operation tools stay
+ * reachable behind search_ghl_tools / invoke_ghl_tool). Otherwise the full list
+ * is returned, filtered by the link's enabled-tools whitelist.
+ */
+export function listTools(enabledTools: string[], options: ListOptions = {}): Tool[] {
+  if (options.gateway) {
+    return [...accountsToolDefinitions, ...gatewayToolDefinitions];
+  }
   return allToolDefinitions().filter((t) => isToolAllowed(t.name, enabledTools));
 }
 
@@ -46,11 +79,48 @@ export function toolCount(): number {
   return REGISTRY.size + accountsToolDefinitions.length;
 }
 
+/** Build the searchable index for the gateway, honoring the link's whitelist. */
+function buildToolIndex(enabledTools: string[]): ToolIndexEntry[] {
+  const index: ToolIndexEntry[] = [];
+  for (const t of accountsToolDefinitions) {
+    index.push({ name: t.name, category: 'accounts', description: t.description || '' });
+  }
+  for (const def of OPERATION_DEFS) {
+    if (!isToolAllowed(def.tool.name, enabledTools)) continue;
+    index.push({
+      name: def.tool.name,
+      category: categoryOf(def.tool.name),
+      description: def.tool.description || '',
+    });
+  }
+  return index;
+}
+
+export interface CallOptions {
+  /** Gateway mode: allow the search/schema/invoke meta-tools. */
+  gateway?: boolean;
+}
+
 /**
- * Execute a tool by name. Enforces the link's whitelist, resolves the target
- * sub-account from args.locationId, and runs the handler against that client.
+ * Execute a tool by name. In gateway mode the three meta-tools are handled here;
+ * everything else (including invoke_ghl_tool's target) goes through dispatchTool,
+ * which enforces the whitelist, resolves the sub-account, and runs the handler.
  */
 export async function callTool(
+  pool: CRMClientPool,
+  name: string,
+  args: Record<string, any>,
+  enabledTools: string[],
+  options: CallOptions = {}
+): Promise<unknown> {
+  if (options.gateway && isGatewayTool(name)) {
+    return executeGatewayTool(pool, name, args, enabledTools);
+  }
+  return dispatchTool(pool, name, args, enabledTools);
+}
+
+/** The core per-tool dispatch: whitelist → accounts shortcut → registry handler. */
+async function dispatchTool(
   pool: CRMClientPool,
   name: string,
   args: Record<string, any>,
@@ -77,4 +147,57 @@ export async function callTool(
 
   const client = pool.get(locationId);
   return def.handler(client, args);
+}
+
+/** Resolve a tool definition for schema lookup (operation, account, or gateway). */
+function findTool(name: string): Tool | undefined {
+  return (
+    REGISTRY.get(name)?.tool ||
+    accountsToolDefinitions.find((t) => t.name === name) ||
+    gatewayToolDefinitions.find((t) => t.name === name)
+  );
+}
+
+/** Handle the gateway meta-tools: search, schema lookup, and invoke. */
+async function executeGatewayTool(
+  pool: CRMClientPool,
+  name: string,
+  args: Record<string, any>,
+  enabledTools: string[]
+): Promise<unknown> {
+  switch (name) {
+    case 'search_ghl_tools': {
+      const query = typeof args.query === 'string' ? args.query : '';
+      const limit = typeof args.limit === 'number' ? args.limit : 15;
+      const results = searchTools(buildToolIndex(enabledTools), query, limit);
+      return { query, count: results.length, results: results.map(({ score, ...r }) => r) };
+    }
+
+    case 'get_ghl_tool_schema': {
+      const target = typeof args.name === 'string' ? args.name : '';
+      if (!target) throw new Error('get_ghl_tool_schema requires a "name".');
+      if (!isAccountsTool(target) && !isGatewayTool(target) && !isToolAllowed(target, enabledTools)) {
+        throw new Error(`Tool "${target}" is not enabled for this link.`);
+      }
+      const tool = findTool(target);
+      if (!tool) throw new Error(`Unknown tool "${target}". Use search_ghl_tools to find valid names.`);
+      return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema };
+    }
+
+    case 'invoke_ghl_tool': {
+      const target = typeof args.name === 'string' ? args.name : '';
+      if (!target) throw new Error('invoke_ghl_tool requires a "name".');
+      if (isGatewayTool(target)) {
+        throw new Error('Cannot invoke a gateway meta-tool. Pass an operation tool name instead.');
+      }
+      const targetArgs =
+        args.arguments && typeof args.arguments === 'object' && !Array.isArray(args.arguments)
+          ? (args.arguments as Record<string, any>)
+          : {};
+      return dispatchTool(pool, target, targetArgs, enabledTools);
+    }
+
+    default:
+      throw new Error(`Unknown gateway tool "${name}".`);
+  }
 }

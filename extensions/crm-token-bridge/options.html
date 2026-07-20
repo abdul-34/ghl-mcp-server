@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CRM Token Bridge Options</title>
+    <style>
+      body {
+        font: 14px/1.5 "IBM Plex Sans", "Segoe UI", sans-serif;
+        max-width: 640px;
+        margin: 32px auto;
+        padding: 0 16px;
+        color: #1c1917;
+      }
+      label { display: block; font-weight: 600; margin: 16px 0 6px; }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid #d6d3d1;
+      }
+      button {
+        margin-top: 18px;
+        padding: 10px 14px;
+        border: 0;
+        border-radius: 8px;
+        background: #0f766e;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .hint { color: #57534e; font-size: 13px; }
+      code { background: #f5f5f4; padding: 1px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>CRM Token Bridge</h1>
+    <p class="hint">
+      Point this at your self-hosted MCP server and paste the capture token generated in the MCP
+      dashboard (Settings → Workflow capture). Captured Firebase credentials are stored, encrypted,
+      on the sub-account that matches the CRM tab you capture from.
+    </p>
+
+    <label for="serverUrl">MCP server URL</label>
+    <input id="serverUrl" placeholder="http://localhost:8000" />
+
+    <label for="captureToken">Capture token</label>
+    <input id="captureToken" type="password" placeholder="Paste the dashboard capture token" />
+
+    <button id="saveBtn">Save</button>
+    <p id="saved" class="hint"></p>
+  </body>
+  <script src="options.js"></script>
+</html>

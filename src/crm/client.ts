@@ -8,6 +8,7 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { WorkflowBuilderClient } from './workflow-builder-client.js';
 
 export interface CRMClientConfig {
   /** Bearer token (Private Integration Token) for this sub-account. */
@@ -16,6 +17,12 @@ export interface CRMClientConfig {
   locationId: string;
   baseUrl?: string;
   version?: string;
+  /**
+   * Lazily resolve the sibling internal-API workflow client for this
+   * sub-account. Injected by the pool; absent for direct/stdio clients. Throws
+   * inside `workflowBuilder()` if the sub-account has no captured workflow creds.
+   */
+  getWorkflowBuilder?: () => WorkflowBuilderClient;
 }
 
 const DEFAULT_BASE_URL = 'https://services.leadconnectorhq.com';
@@ -33,12 +40,14 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export class CRMClient {
   readonly locationId: string;
   private readonly http: AxiosInstance;
+  private readonly getWorkflowBuilder?: () => WorkflowBuilderClient;
 
   constructor(config: CRMClientConfig) {
     if (!config.accessToken) throw new Error('CRMClient: accessToken is required.');
     if (!config.locationId) throw new Error('CRMClient: locationId is required.');
 
     this.locationId = config.locationId;
+    this.getWorkflowBuilder = config.getWorkflowBuilder;
     this.http = axios.create({
       baseURL: config.baseUrl || DEFAULT_BASE_URL,
       timeout: 30_000,
@@ -77,6 +86,21 @@ export class CRMClient {
   }
   delete<T = unknown>(path: string, params?: Record<string, unknown>): Promise<T> {
     return this.request<T>('DELETE', path, { params });
+  }
+
+  /**
+   * The sibling client for GHL's internal workflow-builder API, scoped to the
+   * same sub-account. Throws a friendly error when the pool did not inject one
+   * (stdio/direct clients) or the sub-account has no captured workflow creds.
+   */
+  workflowBuilder(): WorkflowBuilderClient {
+    if (!this.getWorkflowBuilder) {
+      throw new Error(
+        `Workflow tools are unavailable for location "${this.locationId}": no captured workflow ` +
+          `credentials. Run the capture extension against this sub-account, or connect via a link URL.`
+      );
+    }
+    return this.getWorkflowBuilder();
   }
 
   /**

@@ -11,7 +11,14 @@
  */
 
 import { CRMClient } from './client.js';
-import { ResolvedLink, ResolvedLocation, loadLocationsForLink } from '../db/supabase-store.js';
+import { WorkflowBuilderClient } from './workflow-builder-client.js';
+import {
+  ResolvedLink,
+  ResolvedLocation,
+  ResolvedWorkflowCreds,
+  loadLocationsForLink,
+  updateWorkflowCreds,
+} from '../db/supabase-store.js';
 
 export interface AccountSummary {
   locationId: string;
@@ -19,9 +26,11 @@ export interface AccountSummary {
 }
 
 interface Account {
+  subaccountId: string;
   locationId: string;
   accessToken: string;
   name?: string;
+  workflow?: ResolvedWorkflowCreds;
 }
 
 const DEFAULT_BASE_URL = 'https://services.leadconnectorhq.com';
@@ -30,6 +39,7 @@ const DEFAULT_VERSION = '2021-07-28';
 export class CRMClientPool {
   private readonly accounts = new Map<string, Account>();
   private readonly clients = new Map<string, CRMClient>();
+  private readonly workflowClients = new Map<string, WorkflowBuilderClient>();
   private readonly baseUrl: string;
   private readonly version: string;
 
@@ -47,9 +57,11 @@ export class CRMClientPool {
     for (const loc of locations) {
       if (!loc.locationId || !loc.accessToken) continue;
       this.accounts.set(loc.locationId, {
+        subaccountId: loc.subaccountId,
         locationId: loc.locationId,
         accessToken: loc.accessToken,
         name: loc.name,
+        workflow: loc.workflow,
       });
     }
   }
@@ -82,8 +94,47 @@ export class CRMClientPool {
       locationId: acct.locationId,
       baseUrl: this.baseUrl,
       version: this.version,
+      getWorkflowBuilder: () => this.getWorkflowClient(locationId),
     });
     this.clients.set(locationId, client);
+    return client;
+  }
+
+  /**
+   * The internal workflow-builder client for a sub-account, built from its PIT
+   * (Bearer) plus the captured Firebase/builder credentials. Rotated refresh
+   * tokens are persisted back to the sub-account row. Throws when the location
+   * is unknown or has no captured workflow credentials.
+   */
+  getWorkflowClient(locationId: string): WorkflowBuilderClient {
+    const cached = this.workflowClients.get(locationId);
+    if (cached) return cached;
+
+    const acct = this.accounts.get(locationId);
+    if (!acct) {
+      throw new Error(`Unknown sub-account locationId "${locationId}".`);
+    }
+    if (!acct.workflow) {
+      throw new Error(
+        `No workflow credentials captured for sub-account "${locationId}". Run the capture ` +
+          `extension against this location so the server can store its Firebase credentials.`
+      );
+    }
+
+    const subaccountId = acct.subaccountId;
+    const client = new WorkflowBuilderClient({
+      apiKey: acct.accessToken, // PIT — reused as the internal-API Bearer token.
+      firebaseApiKey: acct.workflow.firebaseApiKey || '',
+      firebaseRefreshToken: acct.workflow.firebaseRefreshToken || '',
+      authToken: acct.workflow.authToken,
+      refreshToken: acct.workflow.refreshToken,
+      locationId: acct.locationId,
+      userId: acct.workflow.userId,
+      companyId: acct.workflow.companyId,
+      companyAge: acct.workflow.companyAge,
+      persist: (patch) => updateWorkflowCreds(subaccountId, patch),
+    });
+    this.workflowClients.set(locationId, client);
     return client;
   }
 

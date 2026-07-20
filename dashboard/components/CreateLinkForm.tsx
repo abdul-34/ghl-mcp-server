@@ -12,6 +12,7 @@ export function CreateLinkForm({ subaccounts }: { subaccounts: Subaccount[] }) {
   const [state, formAction, pending] = useActionState(createLink, initial);
   const [scope, setScope] = useState<'location' | 'agency'>('location');
   const [allTools, setAllTools] = useState(true);
+  const [gateway, setGateway] = useState(true);
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -102,6 +103,24 @@ export function CreateLinkForm({ subaccounts }: { subaccounts: Subaccount[] }) {
             )}
           </div>
         )}
+
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              name="gateway_mode"
+              value="on"
+              checked={gateway}
+              onChange={(e) => setGateway(e.target.checked)}
+            />
+            Gateway mode (recommended)
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            Exposes just 3 search/invoke meta-tools instead of the full ~700, keeping the AI&apos;s
+            context small and tool-selection sharp. Every tool below stays reachable via search. The
+            tool restriction still scopes what the gateway can find and run.
+          </p>
+        </div>
 
         <div>
           <label className="flex items-center gap-2 text-sm font-medium text-slate-700">

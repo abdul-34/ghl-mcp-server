@@ -398,15 +398,20 @@ function main() {
   idx.push('');
   fs.writeFileSync(path.join(OUT, 'index.ts'), idx.join('\n'), 'utf8');
 
-  // dashboard catalog
+  // dashboard catalog. Generated groups are merged with MANUAL_TOOL_CATALOG
+  // (hand-written tools not derived from the OpenAPI specs: workflow-builder,
+  // workflow public/insights, and the ported categories) so the tool-picker
+  // lists them too. Editing manual-tools-catalog.ts never triggers a regen here.
   const dash = [];
   dash.push(`// AUTO-GENERATED. Do not edit by hand. Run: node scripts/generate-tools.mjs`);
+  dash.push(`import { MANUAL_TOOL_CATALOG } from './manual-tools-catalog';`);
   dash.push(`export interface ToolGroup { category: string; tools: string[]; }`);
-  dash.push(`export const TOOL_CATALOG: ToolGroup[] = ${JSON.stringify(
+  dash.push(`const GENERATED_TOOL_CATALOG: ToolGroup[] = ${JSON.stringify(
     catalog.map((c) => ({ category: c.category, tools: c.tools.map((t) => t.name) })),
     null,
     2
   )};`);
+  dash.push(`export const TOOL_CATALOG: ToolGroup[] = [...GENERATED_TOOL_CATALOG, ...MANUAL_TOOL_CATALOG];`);
   dash.push(`export const ALL_TOOL_NAMES: string[] = TOOL_CATALOG.flatMap((g) => g.tools);`);
   dash.push('');
   fs.writeFileSync(DASH_CATALOG, dash.join('\n'), 'utf8');

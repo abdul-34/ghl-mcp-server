@@ -1,6 +1,7 @@
 // AUTO-GENERATED. Do not edit by hand. Run: node scripts/generate-tools.mjs
+import { MANUAL_TOOL_CATALOG } from './manual-tools-catalog';
 export interface ToolGroup { category: string; tools: string[]; }
-export const TOOL_CATALOG: ToolGroup[] = [
+const GENERATED_TOOL_CATALOG: ToolGroup[] = [
   {
     "category": "Ad Manager",
     "tools": [
@@ -740,4 +741,5 @@ export const TOOL_CATALOG: ToolGroup[] = [
     ]
   }
 ];
+export const TOOL_CATALOG: ToolGroup[] = [...GENERATED_TOOL_CATALOG, ...MANUAL_TOOL_CATALOG];
 export const ALL_TOOL_NAMES: string[] = TOOL_CATALOG.flatMap((g) => g.tools);

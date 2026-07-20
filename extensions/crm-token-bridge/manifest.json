@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "CRM Token Bridge",
+  "version": "2.0.0",
+  "description": "Capture authorized CRM Firebase and builder tokens and push them to your self-hosted MCP server, stored encrypted per sub-account.",
+  "permissions": [
+    "storage",
+    "scripting",
+    "activeTab",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://*.gohighlevel.com/*",
+    "https://*.leadconnectorhq.com/*",
+    "https://app.gohighlevel.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "CRM Token Bridge",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}

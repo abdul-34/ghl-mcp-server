@@ -13,8 +13,9 @@
 
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { ACCOUNTS_TOOL_NAMES } from './accounts.js';
+import { GATEWAY_TOOL_NAMES } from './gateway.js';
 
-const ALWAYS_ALLOWED = new Set<string>(ACCOUNTS_TOOL_NAMES);
+const ALWAYS_ALLOWED = new Set<string>([...ACCOUNTS_TOOL_NAMES, ...GATEWAY_TOOL_NAMES]);
 
 /** True if `toolName` may be used given the link's `enabledTools` whitelist. */
 export function isToolAllowed(toolName: string, enabledTools: string[]): boolean {

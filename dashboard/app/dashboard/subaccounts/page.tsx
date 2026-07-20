@@ -8,7 +8,7 @@ export default async function SubaccountsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: subaccounts } = await supabase
     .from('subaccounts')
-    .select('id, name, location_id, created_at')
+    .select('id, name, location_id, created_at, base_refresh_token, workflow_creds_updated_at')
     .order('created_at', { ascending: false });
 
   return (
@@ -31,7 +31,18 @@ export default async function SubaccountsPage() {
             {subaccounts.map((s) => (
               <li key={s.id} className="flex items-center justify-between px-6 py-4">
                 <div>
-                  <div className="font-medium">{s.name || '(unnamed)'}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{s.name || '(unnamed)'}</span>
+                    {s.base_refresh_token ? (
+                      <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">
+                        workflow ready
+                      </span>
+                    ) : (
+                      <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+                        no workflow creds
+                      </span>
+                    )}
+                  </div>
                   <div className="font-mono text-xs text-slate-500">{s.location_id}</div>
                 </div>
                 <form action={deleteSubaccount}>

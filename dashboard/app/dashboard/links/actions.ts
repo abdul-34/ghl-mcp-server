@@ -26,6 +26,7 @@ export async function createLink(
   const label = String(formData.get('label') || '').trim();
   const scope = String(formData.get('scope') || '');
   const subaccountId = String(formData.get('subaccount_id') || '').trim();
+  const gatewayMode = formData.get('gateway_mode') === 'on';
   const selected = formData.getAll('tools').map(String).filter(Boolean);
   // "all tools" is represented by an empty whitelist.
   const enabledTools = selected.filter((t) => ALL_TOOL_NAMES.includes(t));
@@ -53,6 +54,7 @@ export async function createLink(
     subaccount_id: scope === 'location' ? subaccountId : null,
     url_token_hash,
     enabled_tools: enabledTools,
+    gateway_mode: gatewayMode,
   });
 
   if (error) return { ok: false, error: error.message };

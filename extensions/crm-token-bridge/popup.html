@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CRM Token Bridge</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f1ea;
+        --ink: #1c1917;
+        --accent: #0f766e;
+        --muted: #57534e;
+        --card: #fffdf8;
+        --danger: #b91c1c;
+      }
+      body {
+        margin: 0;
+        font: 13px/1.45 "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: radial-gradient(circle at top left, #d9f3ef, var(--bg) 55%);
+        min-width: 320px;
+      }
+      main { padding: 14px 14px 16px; }
+      h1 {
+        margin: 0 0 4px;
+        font: 600 16px/1.2 "IBM Plex Serif", Georgia, serif;
+      }
+      p { margin: 0 0 12px; color: var(--muted); }
+      .card {
+        background: var(--card);
+        border: 1px solid #e7e5e4;
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 12px;
+        background: var(--accent);
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #292524;
+        margin-top: 8px;
+      }
+      button:disabled { opacity: 0.55; cursor: wait; }
+      .ok { color: var(--accent); }
+      .err { color: var(--danger); }
+      code { font-size: 11px; }
+      .row { display: flex; justify-content: space-between; gap: 8px; margin: 4px 0; }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>CRM Token Bridge</h1>
+      <p>Capture Firebase + builder tokens from an authorized CRM tab into your MCP server.</p>
+
+      <div class="card" id="statusCard">
+        <div class="row"><span>Server</span><strong id="serverStatus">Checking…</strong></div>
+        <div class="row"><span>Last capture</span><span id="lastIngest">—</span></div>
+      </div>
+
+      <button id="captureBtn">Capture from this CRM tab</button>
+      <button class="secondary" id="optionsBtn">Open options</button>
+      <p id="message" style="margin-top:10px;"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

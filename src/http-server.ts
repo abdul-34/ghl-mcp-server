@@ -21,7 +21,15 @@ import {
 import * as dotenv from 'dotenv';
 
 import { CRMClientPool } from './crm/pool.js';
-import { resolveLinkToken, checkSupabase, touchLinkLastUsed, ResolvedLink } from './db/supabase-store.js';
+import {
+  resolveLinkToken,
+  checkSupabase,
+  touchLinkLastUsed,
+  ResolvedLink,
+  resolveCaptureToken,
+  storeCapturedWorkflowCreds,
+  touchCaptureTokenUsed,
+} from './db/supabase-store.js';
 import { listTools, callTool, toolCount } from './tools/index.js';
 
 dotenv.config();
@@ -57,21 +65,35 @@ class CRMMcpHttpServer {
   }
 
   private setupExpress(): void {
+    // Allowed browser origins. Extensions (chrome-extension://<id>) are allowed
+    // so the token-capture bridge can POST to /capture — the capture token, not
+    // the origin, is the security boundary there.
+    const allowedOrigins: (string | RegExp)[] = [
+      'https://chatgpt.com',
+      'https://chat.openai.com',
+      'https://claude.ai',
+      'https://claude.com',
+      /^http:\/\/localhost(:\d+)?$/,
+      /^http:\/\/127\.0\.0\.1(:\d+)?$/,
+    ];
     this.app.use(
       cors({
-        origin: [
-          'https://chatgpt.com',
-          'https://chat.openai.com',
-          'https://claude.ai',
-          'https://claude.com',
-          /^http:\/\/localhost(:\d+)?$/,
-          /^http:\/\/127\.0\.0\.1(:\d+)?$/,
-        ],
+        origin: (origin, cb) => {
+          if (!origin) return cb(null, true); // non-browser / same-origin
+          if (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) {
+            return cb(null, true);
+          }
+          const ok = allowedOrigins.some((rule) =>
+            typeof rule === 'string' ? rule === origin : rule.test(origin)
+          );
+          return cb(null, ok);
+        },
         methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
         allowedHeaders: [
           'Content-Type',
           'Authorization',
           'Accept',
+          'X-Capture-Token',
           'Mcp-Session-Id',
           'mcp-session-id',
           'Mcp-Protocol-Version',
@@ -131,6 +153,89 @@ class CRMMcpHttpServer {
     }
   };
 
+  /** Pull the raw capture token from the path, X-Capture-Token header, or Bearer. */
+  private extractCaptureToken(req: express.Request): string | undefined {
+    const pathToken = (req.params as Record<string, string | undefined>)?.token;
+    if (typeof pathToken === 'string' && pathToken.length > 0) return pathToken;
+    const header = req.headers['x-capture-token'];
+    if (typeof header === 'string' && header.length > 0) return header;
+    const authHeader = req.headers['authorization'];
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      return authHeader.slice('Bearer '.length).trim();
+    }
+    return undefined;
+  }
+
+  /** Store Firebase workflow credentials harvested by the capture extension. */
+  private handleCapture: express.RequestHandler = async (req, res) => {
+    const token = this.extractCaptureToken(req);
+    if (!token) {
+      res.status(401).json({ ok: false, error: 'Missing capture token. Use /capture/<token> or X-Capture-Token.' });
+      return;
+    }
+
+    let owner: { tokenId: string; ownerId: string } | null;
+    try {
+      owner = await resolveCaptureToken(token);
+    } catch (err) {
+      console.error('[CAPTURE] token lookup failed', err);
+      res.status(500).json({ ok: false, error: 'Capture token lookup failed.' });
+      return;
+    }
+    if (!owner) {
+      res.status(401).json({ ok: false, error: 'Invalid or revoked capture token.' });
+      return;
+    }
+
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    const locationId = typeof body.locationId === 'string' ? body.locationId.trim() : '';
+    const firebaseRefreshToken = typeof body.firebaseRefreshToken === 'string' ? body.firebaseRefreshToken : undefined;
+    const firebaseApiKey = typeof body.firebaseApiKey === 'string' ? body.firebaseApiKey : undefined;
+    const authToken = typeof body.authToken === 'string' ? body.authToken : undefined;
+    const companyId = typeof body.companyId === 'string' ? body.companyId : undefined;
+    const userId = typeof body.userId === 'string' ? body.userId : undefined;
+
+    if (!locationId) {
+      res.status(400).json({ ok: false, error: 'locationId is required (open a CRM sub-account tab before capturing).' });
+      return;
+    }
+    if (!firebaseRefreshToken && !authToken) {
+      res.status(400).json({ ok: false, error: 'No Firebase refresh token or builder token found to store.' });
+      return;
+    }
+
+    try {
+      const result = await storeCapturedWorkflowCreds(owner.ownerId, {
+        locationId,
+        firebaseApiKey,
+        firebaseRefreshToken,
+        authToken,
+        companyId,
+        userId,
+      });
+      if (!result.ok) {
+        res.status(409).json({ ok: false, error: result.error });
+        return;
+      }
+      void touchCaptureTokenUsed(owner.tokenId);
+      res.json({
+        ok: true,
+        summary: {
+          locationId,
+          storedFirebase: Boolean(firebaseRefreshToken),
+          storedBuilderToken: Boolean(authToken),
+          storedCompanyId: Boolean(companyId),
+          storedUserId: Boolean(userId),
+        },
+      });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      const safe = raw.replace(/Bearer\s+[^\s"']+/gi, 'Bearer ***').replace(/pit-[a-zA-Z0-9-]+/g, 'pit-***');
+      console.error('[CAPTURE] store failed:', safe);
+      res.status(500).json({ ok: false, error: 'Failed to store captured credentials.' });
+    }
+  };
+
   /** Build a fresh MCP Server bound to one session's pool + link. */
   private buildMcpServer(pool: CRMClientPool, link: ResolvedLink): Server {
     const server = new Server(
@@ -138,15 +243,16 @@ class CRMMcpHttpServer {
       { capabilities: { tools: {} } }
     );
     const enabledTools = link.enabledTools || [];
+    const gateway = link.gatewayMode === true;
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: listTools(enabledTools),
+      tools: listTools(enabledTools, { gateway }),
     }));
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       try {
-        const result = await callTool(pool, name, (args as Record<string, any>) || {}, enabledTools);
+        const result = await callTool(pool, name, (args as Record<string, any>) || {}, enabledTools, { gateway });
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (error) {
         const raw = error instanceof Error ? error.message : String(error);
@@ -171,9 +277,18 @@ class CRMMcpHttpServer {
 
     this.app.get('/tools', this.requireAuth, (req, res) => {
       const link = res.locals.link as ResolvedLink | undefined;
-      const tools = listTools(link?.enabledTools || []);
+      const tools = listTools(link?.enabledTools || [], { gateway: link?.gatewayMode === true });
       res.json({ tools, count: tools.length });
     });
+
+    // ─── Workflow credential capture (browser extension → DB) ──────────────
+    // The capture token (path, X-Capture-Token header, or Bearer) resolves to an
+    // agency owner; the harvested Firebase creds are stored on that owner's
+    // sub-account matching the posted locationId. The sub-account (with its PIT)
+    // must already exist — we never create one here.
+    for (const capturePath of ['/capture', '/capture/:token']) {
+      this.app.post(capturePath, this.handleCapture);
+    }
 
     const handleMcpPost = async (req: express.Request, res: express.Response) => {
       try {

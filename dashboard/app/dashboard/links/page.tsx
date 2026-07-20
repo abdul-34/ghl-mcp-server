@@ -11,7 +11,7 @@ export default async function LinksPage() {
     supabase.from('subaccounts').select('id, name, location_id').order('created_at'),
     supabase
       .from('mcp_links')
-      .select('id, label, scope, subaccount_id, enabled_tools, revoked, created_at, last_used_at')
+      .select('id, label, scope, subaccount_id, enabled_tools, revoked, created_at, last_used_at, gateway_mode')
       .order('created_at', { ascending: false }),
   ]);
 
@@ -43,6 +43,11 @@ export default async function LinksPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{l.label || '(untitled link)'}</span>
+                      {l.gateway_mode && (
+                        <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700">
+                          gateway
+                        </span>
+                      )}
                       {l.revoked && (
                         <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">
                           revoked

@@ -29,6 +29,7 @@ dotenv.config();
 class CRMMcpServer {
   private server: Server;
   private pool!: CRMClientPool;
+  private gateway = false;
 
   constructor() {
     this.server = new Server(
@@ -40,13 +41,15 @@ class CRMMcpServer {
 
   private setupHandlers(): void {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: listTools([]),
+      tools: listTools([], { gateway: this.gateway }),
     }));
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       try {
-        const result = await callTool(this.pool, name, (args as Record<string, any>) || {}, []);
+        const result = await callTool(this.pool, name, (args as Record<string, any>) || {}, [], {
+          gateway: this.gateway,
+        });
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (error) {
         const raw = error instanceof Error ? error.message : String(error);
@@ -63,17 +66,25 @@ class CRMMcpServer {
     const pitToken = process.env.CRM_PIT_TOKEN?.trim();
     const locationId = process.env.CRM_LOCATION_ID?.trim();
     const linkToken = process.env.MCP_LINK_TOKEN?.trim();
+    const gatewayEnv = process.env.MCP_GATEWAY_MODE === 'true';
 
     try {
       if (pitToken && locationId) {
         this.pool = CRMClientPool.fromLocations([
-          { locationId, accessToken: pitToken, name: process.env.CRM_LOCATION_NAME?.trim() || undefined },
+          {
+            subaccountId: locationId, // direct mode: no DB row; workflow creds unavailable.
+            locationId,
+            accessToken: pitToken,
+            name: process.env.CRM_LOCATION_NAME?.trim() || undefined,
+          },
         ]);
+        this.gateway = gatewayEnv;
       } else if (linkToken) {
         const link = await resolveLinkToken(linkToken);
         if (!link) throw new Error('MCP_LINK_TOKEN did not match any live link in Supabase.');
         const locations = await loadLocationsForLink(link);
         this.pool = CRMClientPool.fromLocations(locations);
+        this.gateway = link.gatewayMode || gatewayEnv;
       } else {
         throw new Error(
           'No credentials. Set CRM_PIT_TOKEN + CRM_LOCATION_ID for a single sub-account, ' +
