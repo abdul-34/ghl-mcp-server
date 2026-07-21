@@ -58,6 +58,8 @@ export interface NativeWorkflowModule {
   executionConfig?: Record<string, unknown>;
   isDeleted?: boolean;
   isHidden?: boolean;
+  /** Normalized flag: this module is marked hidden in the CRM builder. */
+  hidden?: boolean;
   [key: string]: unknown;
 }
 
@@ -75,6 +77,10 @@ export interface NativeModuleSearchHit {
   hasExampleAttributes?: boolean;
   hasExampleTrigger?: boolean;
   hasExampleVariants?: boolean;
+  /** Field names whose values are generated live by GHL (not in the static schema). */
+  dynamicFields?: string[];
+  /** True when the module is marked hidden in the CRM builder. */
+  hidden?: boolean;
   allowedOperators?: string[];
   score: number;
 }
@@ -163,12 +169,15 @@ function normalizeModule(
 ): NativeWorkflowModule | null {
   const key = asString(raw.key);
   if (!key) return null;
-  if (raw.isDeleted === true || raw.isHidden === true) return null;
+  // Drop only truly-removed modules. Keep hidden ones (flagged) so they're still
+  // discoverable — some useful native/third-party modules are marked hidden.
+  if (raw.isDeleted === true) return null;
 
   return {
     ...raw,
     key,
     kind,
+    hidden: raw.isHidden === true,
     section: asString(raw.section) || groupName || 'Other',
     info: (raw.info as NativeModuleInfo | undefined) || undefined,
     inputs: Array.isArray(raw.inputs) ? (raw.inputs as NativeModuleInput[]) : undefined,
@@ -177,6 +186,26 @@ function normalizeModule(
     customVars: Array.isArray(raw.customVars) ? (raw.customVars as Array<Record<string, unknown>>) : undefined,
     version: asString(raw.version) || undefined,
   };
+}
+
+/**
+ * Field names whose valid values are generated live by GHL (dynamic fields) — the
+ * static schema lists the field but not its options. Detected via a
+ * dynamicFieldsConfig on the input or a fieldType that signals a dynamic source.
+ */
+function collectDynamicFields(mod: NativeWorkflowModule): string[] {
+  const scan = (inputs: NativeModuleInput[] | undefined): string[] => {
+    if (!Array.isArray(inputs)) return [];
+    return inputs
+      .filter((input) => {
+        const hasDynamicConfig = Boolean((input as { dynamicFieldsConfig?: unknown }).dynamicFieldsConfig);
+        const ft = asString(input.fieldType).toLowerCase();
+        return hasDynamicConfig || ft.includes('dynamic');
+      })
+      .map(fieldName)
+      .filter(Boolean);
+  };
+  return [...new Set([...scan(mod.inputs), ...scan(mod.filters)])];
 }
 
 function loadCatalog(forceReload = false): IndexedCatalog {
@@ -247,6 +276,9 @@ function scoreModule(mod: NativeWorkflowModule, query: string, tokens: string[])
     if (haystack.includes(token)) score += 10;
   }
 
+  // Keep hidden modules discoverable but ranked below visible equivalents.
+  if (mod.hidden && score > 1) score = Math.max(1, score - 150);
+
   return score;
 }
 
@@ -279,6 +311,11 @@ function toSearchHit(mod: NativeWorkflowModule, score: number): NativeModuleSear
         (mod as { exampleNodes?: unknown }).exampleNodes ||
         (mod as { usageModes?: unknown }).usageModes
     ),
+    dynamicFields: (() => {
+      const df = collectDynamicFields(mod);
+      return df.length ? df : undefined;
+    })(),
+    hidden: mod.hidden || undefined,
     allowedOperators: allowedOperators.length ? allowedOperators : undefined,
     score,
   };
@@ -360,6 +397,42 @@ export function searchNativeWorkflowModules(options: {
   };
 }
 
+/**
+ * When a module's static schema can't fully describe the payload (dynamic-value
+ * fields, empty inputs, or a hidden module), tell the caller how to get a
+ * ground-truth payload instead of guessing.
+ */
+function resolutionFor(mod: NativeWorkflowModule): {
+  dynamicFields?: string[];
+  hidden?: boolean;
+  resolution?: string;
+} {
+  const dynamicFields = collectDynamicFields(mod);
+  const hasStaticSchema =
+    (Array.isArray(mod.inputs) && mod.inputs.length > 0) ||
+    (Array.isArray(mod.filters) && mod.filters.length > 0);
+  const needsExamples = dynamicFields.length > 0 || !hasStaticSchema;
+
+  let resolution: string | undefined;
+  if (needsExamples) {
+    const reason = !hasStaticSchema
+      ? 'This module has no static field schema'
+      : `Fields ${dynamicFields.join(', ')} have values generated live by GHL`;
+    resolution =
+      `${reason}. For the exact payload, call crm_find_workflow_examples with key "${mod.key}" to pull a ` +
+      `real ${mod.kind} from your own workflows` +
+      (mod.key.startsWith('lc_')
+        ? ', or crm_get_workflow_module if this is an installed marketplace app.'
+        : '.');
+  }
+
+  return {
+    dynamicFields: dynamicFields.length ? dynamicFields : undefined,
+    hidden: mod.hidden || undefined,
+    resolution,
+  };
+}
+
 export function getNativeWorkflowModule(options: {
   key: string;
   type?: 'actions' | 'triggers' | 'both';
@@ -369,6 +442,9 @@ export function getNativeWorkflowModule(options: {
   found: boolean;
   module?: Record<string, unknown>;
   matches?: NativeModuleSearchHit[];
+  dynamicFields?: string[];
+  hidden?: boolean;
+  resolution?: string;
   note: string;
 } {
   const catalog = loadCatalog();
@@ -390,7 +466,8 @@ export function getNativeWorkflowModule(options: {
       catalogPath: catalog.path,
       found: true,
       module: slimModuleForResponse(exact[0]),
-      note: 'Populate workflow attributes/conditions from inputs or filters. Use exampleAttributes / exampleNode / exampleTrigger when present — those are the exact CRM payload shapes.',
+      ...resolutionFor(exact[0]),
+      note: 'Populate workflow attributes/conditions from inputs or filters. Use exampleAttributes / exampleNode / exampleTrigger when present — those are the exact CRM payload shapes. If a resolution hint is present, prefer crm_find_workflow_examples for a real payload.',
     };
   }
 
@@ -401,6 +478,7 @@ export function getNativeWorkflowModule(options: {
       found: true,
       matches: exact.map(mod => toSearchHit(mod, 1000)),
       module: slimModuleForResponse(exact[0]),
+      ...resolutionFor(exact[0]),
       note: `Multiple modules share key "${key}"; returning the first. Prefer filtering by type.`,
     };
   }
@@ -417,7 +495,7 @@ export function getNativeWorkflowModule(options: {
     catalogPath: catalog.path,
     found: false,
     matches: suggestions.results,
-    note: `No exact module for key "${key}". Closest matches are in matches[]; pick one and call this tool again.`,
+    note: `No exact module for key "${key}". Closest matches are in matches[]; pick one and call this tool again. If this is an installed app or a real payload is needed, try crm_find_workflow_examples or crm_search_workflow_modules.`,
   };
 }
 

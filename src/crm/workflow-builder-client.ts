@@ -74,6 +74,18 @@ export interface WorkflowFull {
   [key: string]: unknown;
 }
 
+/** A real action/trigger payload mined from an existing workflow. */
+export interface WorkflowExample {
+  kind: 'action' | 'trigger';
+  type: string;
+  name?: string;
+  attributes?: Record<string, unknown>;
+  conditions?: unknown;
+  schedule_config?: unknown;
+  workflowId: string;
+  workflowName: string;
+}
+
 /** Rotated tokens handed to the caller to persist (e.g. to Supabase). */
 export interface WorkflowCredsPatch {
   firebaseRefreshToken?: string;
@@ -114,6 +126,8 @@ export class WorkflowBuilderClient {
   private autoSaveSessions = new Map<string, string>();
   /** Which auth the marketplace endpoint accepted (learned once per session). */
   private marketplaceAuthMode: 'workflow' | 'builder' | null = null;
+  /** Cached index of real action/trigger payloads mined from live workflows. */
+  private exampleIndex: Map<string, WorkflowExample[]> | null = null;
 
   private static readonly API_ORIGIN = 'https://backend.leadconnectorhq.com';
   private static readonly BUILDER_ORIGIN = 'https://client-app-automation-workflows.leadconnectorhq.com';
@@ -502,7 +516,14 @@ export class WorkflowBuilderClient {
       const current = await this.getWorkflow(workflowId);
       const context = await this.getWriteContext(current);
       const triggers = await this.listWorkflowTriggers(workflowId);
-      await this.validateWorkflowAssets(actions, triggers, context.companyId);
+      const validation = await this.validateWorkflowAssets(actions, triggers, context.companyId);
+      const issues = this.extractValidationIssues(validation);
+      if (issues.length) {
+        // Validation won't change across retries — fail fast with actionable detail
+        // so the caller can fix the action attributes (use crm_find_workflow_examples
+        // for a real payload, or crm_validate_workflow to iterate).
+        throw new Error(`Workflow validation failed before commit: ${issues.join('; ')}`);
+      }
       const body = this.buildCommitBody(workflowId, current, actions, name, context, triggers);
 
       try {
@@ -555,6 +576,148 @@ export class WorkflowBuilderClient {
       }
     );
     return data;
+  }
+
+  /**
+   * Dry-run a workflow graph: build the action chain and run the builder's
+   * validate-assets preflight WITHOUT committing. Lets the caller iterate
+   * build → validate → fix → create before writing anything.
+   */
+  async validateWorkflow(
+    rawActions: WorkflowAction[],
+    triggers: WorkflowTrigger[] = []
+  ): Promise<{ valid: boolean; issues: string[]; raw: unknown }> {
+    const actions = this.buildActionChain(rawActions);
+    const context = await this.getWriteContext();
+    const raw = await this.validateWorkflowAssets(actions, triggers, context.companyId);
+    const issues = this.extractValidationIssues(raw);
+    return { valid: issues.length === 0, issues, raw };
+  }
+
+  /**
+   * Best-effort extraction of validation problems from validate-assets' 200 body.
+   * The exact shape is undocumented, so we probe the common ones. A non-2xx
+   * response is already surfaced by request() throwing with the body.
+   */
+  private extractValidationIssues(result: unknown): string[] {
+    const issues: string[] = [];
+    const rec = result && typeof result === 'object' ? (result as Record<string, unknown>) : null;
+    if (!rec) return issues;
+    if (rec.valid === false || rec.isValid === false) issues.push('validate-assets reported the graph invalid');
+
+    const collect = (v: unknown) => {
+      if (!Array.isArray(v)) return;
+      for (const e of v) {
+        if (typeof e === 'string') issues.push(e);
+        else if (e && typeof e === 'object') {
+          const r = e as Record<string, unknown>;
+          const msg = r.message || r.error || r.reason || r.detail;
+          issues.push(typeof msg === 'string' ? msg : JSON.stringify(e));
+        }
+      }
+    };
+    collect(rec.errors);
+    collect(rec.issues);
+    collect(rec.invalid);
+    collect(rec.invalidActions);
+    collect(rec.invalidTriggers);
+    return issues;
+  }
+
+  // ─── Example mining ─────────────────────────────────────
+
+  /**
+   * Build (once per session) an index of real action/trigger payloads from the
+   * agency's own workflows. This is the ground-truth source for dynamic-field
+   * values and third-party modules the static catalog can't describe.
+   */
+  private async buildExampleIndex(maxWorkflows: number): Promise<Map<string, WorkflowExample[]>> {
+    if (this.exampleIndex) return this.exampleIndex;
+
+    const index = new Map<string, WorkflowExample[]>();
+    const push = (type: string | undefined, ex: WorkflowExample) => {
+      if (!type) return;
+      const list = index.get(type) || [];
+      list.push(ex);
+      index.set(type, list);
+    };
+
+    const { rows } = await this.listWorkflows({ limit: Math.min(Math.max(maxWorkflows, 1), 100) });
+    for (const row of rows.slice(0, maxWorkflows)) {
+      const id = row._id;
+      if (!id) continue;
+      let wf: WorkflowFull;
+      try {
+        wf = await this.getWorkflow(id);
+      } catch {
+        continue;
+      }
+      const workflowName = wf.name || row.name || id;
+      for (const a of wf.workflowData?.templates || []) {
+        push(a.type, {
+          kind: 'action',
+          type: a.type,
+          name: a.name,
+          attributes: a.attributes,
+          workflowId: id,
+          workflowName,
+        });
+      }
+      try {
+        const triggers = await this.listWorkflowTriggers(id);
+        for (const t of triggers) {
+          push(t.type, {
+            kind: 'trigger',
+            type: t.type,
+            name: t.name,
+            conditions: t.conditions,
+            schedule_config: t.schedule_config,
+            workflowId: id,
+            workflowName,
+          });
+        }
+      } catch {
+        // triggers are optional for the index
+      }
+    }
+
+    this.exampleIndex = index;
+    return index;
+  }
+
+  /**
+   * Return real, deduped example payloads for one action/trigger `type` (catalog
+   * key), mined from the agency's live workflows.
+   */
+  async findExamples(opts: {
+    type: string;
+    kind?: 'action' | 'trigger';
+    limit?: number;
+    maxWorkflows?: number;
+    refresh?: boolean;
+  }): Promise<{ type: string; workflowsScanned: number; examples: WorkflowExample[] }> {
+    if (opts.refresh) this.exampleIndex = null;
+    const maxWorkflows = Math.min(Math.max(opts.maxWorkflows ?? 25, 1), 100);
+    const limit = Math.min(Math.max(opts.limit ?? 3, 1), 20);
+
+    const index = await this.buildExampleIndex(maxWorkflows);
+    let list = index.get(opts.type) || [];
+    if (opts.kind) list = list.filter((e) => e.kind === opts.kind);
+
+    const seen = new Set<string>();
+    const examples: WorkflowExample[] = [];
+    for (const e of list) {
+      const shapeKey = JSON.stringify(e.attributes ?? e.conditions ?? {});
+      if (seen.has(shapeKey)) continue;
+      seen.add(shapeKey);
+      examples.push(e);
+      if (examples.length >= limit) break;
+    }
+
+    const workflowsScanned = new Set(
+      Array.from(index.values()).flat().map((e) => e.workflowId)
+    ).size;
+    return { type: opts.type, workflowsScanned, examples };
   }
 
   async listWorkflowTriggers(workflowId: string): Promise<WorkflowTrigger[]> {

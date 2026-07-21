@@ -81,9 +81,11 @@ export const workflowBuilderTools: ToolDef[] = [
     name: 'ghl_create_workflow',
     description:
       'Create a complete CRM workflow using the internal builder flow: create the draft, validate-assets + PUT the action graph, ' +
-      'create and verify each trigger separately, then optionally publish. Before calling this tool, discover schemas with ' +
-      'crm_search_native_workflow_modules / crm_get_native_workflow_module for native CRM modules, or ' +
-      'crm_search_workflow_modules then crm_get_workflow_module for installed marketplace apps. ' +
+      'create and verify each trigger separately, then optionally publish. ' +
+      'Resolution chain for building valid actions: (1) crm_search_native_workflow_modules → crm_get_native_workflow_module ' +
+      'for native modules, or crm_search_workflow_modules → crm_get_workflow_module for installed apps; ' +
+      '(2) if the module has dynamic fields or no static schema, call crm_find_workflow_examples for a real payload; ' +
+      '(3) optionally crm_validate_workflow to dry-run before creating. ' +
       'Action fields must match the selected module inputs. Linear actions are chained automatically.',
     properties: {
       name: { type: 'string', description: 'Workflow name (required)' },
@@ -181,7 +183,9 @@ export const workflowBuilderTools: ToolDef[] = [
       '(examples: contact_created, appointment, customer_appointment, opportunity_created, ' +
       'opportunity_status_changed, opportunity_decay, email, sms, wait, create_update_contact, find_contact). ' +
       'Returns inputs/filters plus exampleAttributes / exampleAttributesVariants / exampleTrigger / exampleNodes. ' +
-      'Use after crm_search_native_workflow_modules. Runtime code blobs are omitted.',
+      'Use after crm_search_native_workflow_modules. Runtime code blobs are omitted. ' +
+      'If the response includes `dynamicFields` or a `resolution` hint (dynamic-value or schema-less module), ' +
+      'call crm_find_workflow_examples with this key to get a real payload instead of guessing values.',
     properties: {
       key: { type: 'string', description: 'Exact module key, for example am-add-lead or asana_ia_asana_create_task' },
       type: { type: 'string', enum: ['actions', 'triggers', 'both'], description: 'Optional kind filter when the same key might exist in both catalogs' },
@@ -294,6 +298,82 @@ export const workflowBuilderTools: ToolDef[] = [
     },
   }),
 
+  // ─── EXAMPLE MINING (ground truth for dynamic/stub schemas) ─
+  defineTool({
+    name: 'crm_find_workflow_examples',
+    description:
+      'Return REAL example payloads for an action/trigger type, mined from this sub-account\'s own live ' +
+      'workflows. Use this when a native module has dynamic fields (values generated live by GHL), is a ' +
+      'third-party app stub, or you want the exact attributes/conditions shape before building. This is the ' +
+      'ground-truth source the static catalog can\'t provide. Pass the exact catalog key (from ' +
+      'crm_search_native_workflow_modules) as `type`. Returns the actual attributes/conditions used, with the ' +
+      'source workflow. Scans a bounded set of workflows once per session (cached).',
+    properties: {
+      type: { type: 'string', description: 'Exact action/trigger key (module key), e.g. "send_sms" or "contact_created".' },
+      kind: { type: 'string', enum: ['action', 'trigger'], description: 'Restrict to action or trigger examples (optional).' },
+      limit: { type: 'number', minimum: 1, maximum: 20, description: 'Max distinct examples to return (default 3).' },
+      maxWorkflows: { type: 'number', minimum: 1, maximum: 100, description: 'Max workflows to scan when building the index (default 25).' },
+      refresh: { type: 'boolean', description: 'Rebuild the example index instead of using the cached one.' },
+    },
+    required: ['type'],
+    handler: async (client, args) => {
+      const wf = client.workflowBuilder();
+      const type = args.type as string;
+      if (!type) throw new Error('type is required');
+      const result = await wf.findExamples({
+        type,
+        kind: args.kind as 'action' | 'trigger' | undefined,
+        limit: args.limit as number | undefined,
+        maxWorkflows: args.maxWorkflows as number | undefined,
+        refresh: args.refresh as boolean | undefined,
+      });
+      return {
+        type: result.type,
+        workflowsScanned: result.workflowsScanned,
+        exampleCount: result.examples.length,
+        examples: result.examples,
+        note: result.examples.length
+          ? 'These are real payloads from your workflows. Copy the attributes/conditions shape when building.'
+          : `No workflow in the scanned set uses "${type}". Try a higher maxWorkflows, or build from the module schema / crm_get_workflow_module.`,
+      };
+    },
+  }),
+
+  // ─── VALIDATE (dry-run) ─────────────────────────────────────
+  defineTool({
+    name: 'crm_validate_workflow',
+    description:
+      'Dry-run a workflow graph through the CRM builder\'s validate-assets preflight WITHOUT creating or ' +
+      'modifying anything. Returns whether the actions/triggers are valid and any issues found, so you can ' +
+      'fix attributes before calling ghl_create_workflow / ghl_update_workflow_actions. Recommended after ' +
+      'building actions from a module schema, especially for dynamic-field modules.',
+    properties: {
+      actions: {
+        type: 'array',
+        description: 'Action graph to validate. Same shape as ghl_create_workflow.',
+        items: WORKFLOW_ACTION_SCHEMA,
+      },
+      triggers: {
+        type: 'array',
+        description: 'Triggers to validate alongside the actions (optional).',
+        items: WORKFLOW_TRIGGER_SCHEMA,
+      },
+    },
+    handler: async (client, args) => {
+      const wf = client.workflowBuilder();
+      const actions = (args.actions as WorkflowAction[] | undefined) || [];
+      const triggers = (args.triggers as WorkflowTrigger[] | undefined) || [];
+      const result = await wf.validateWorkflow(actions, triggers);
+      return {
+        valid: result.valid,
+        issues: result.issues,
+        note: result.valid
+          ? 'validate-assets found no issues — safe to create/update.'
+          : 'Fix the issues above. For correct attribute values use crm_find_workflow_examples.',
+      };
+    },
+  }),
+
   // ─── LIST / GET FULL ───────────────────────────────────────
   defineTool({
     name: 'ghl_list_workflows_full',
@@ -365,6 +445,8 @@ export const workflowBuilderTools: ToolDef[] = [
       'Add or replace actions (and optionally triggers) in an existing workflow. ' +
       'Commits the same way as the CRM builder: validate-assets, then PUT (reuses autoSaveSessionId; retries commit-lock 422s). ' +
       'Actions are auto-chained unless explicit next/parentKey is provided for branching. ' +
+      'For correct attribute values on dynamic/third-party modules, use crm_find_workflow_examples; ' +
+      'dry-run with crm_validate_workflow before committing. Validation failures are returned with details. ' +
       'If CRM returns a pending-commit 422 after retries, wait 2–3 minutes or save once in the builder — do not rapid-retry. ' +
       'Can also update workflow name and status.',
     properties: {
