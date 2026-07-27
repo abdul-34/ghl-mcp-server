@@ -23,6 +23,7 @@ import {
   listNativeWorkflowSections,
   searchNativeWorkflowModules,
   isIntegrationKey,
+  lookupNativeModule,
 } from '../catalog/native-workflow-catalog.js';
 
 /** locationId as an OPTIONAL arg: pass it to fold in the complete live module list. */
@@ -40,19 +41,50 @@ import {
 } from '../catalog/marketplace-module-slim.js';
 import { validateWorkflowGraph, AppModuleSchema } from '../catalog/workflow-validator.js';
 
+/** Structural builder constructs that are valid without any catalog/marketplace lookup. */
+const STRUCTURAL_TYPES = new Set([
+  'goto', 'if_else', 'condition', 'branch', 'transition', 'filter', 'fork', 'join', 'end', 'wait',
+]);
+
 /**
- * Gather the live context the local validator needs: the complete set of valid
- * module keys (native smartlist + installed apps) and installed-app schemas (for
- * required-field checks on app-typed actions). Both best-effort — a location
- * without workflow creds or a flaky marketplace just yields undefined.
+ * Gather the live context the local validator needs for THIS workflow:
+ *   - knownKeys: the native smartlist (complete set of built-in keys), and
+ *   - appModules: installed marketplace-app schemas, resolved for exactly the
+ *     action/trigger types the workflow uses that the native list doesn't cover.
+ *
+ * Resolving per-workflow-type (not a broad prefetch) is what makes app detection
+ * reliable: a module key like "create_task___________" carries no app context, so
+ * it's resolved by searching the marketplace for its humanized label. Both steps are
+ * best-effort — a location without workflow creds or a flaky marketplace yields
+ * undefined and validation degrades to catalog-only.
  */
 async function collectValidationContext(
-  wf: WorkflowBuilderClient
+  wf: WorkflowBuilderClient,
+  actions: WorkflowAction[] = [],
+  triggers: WorkflowTrigger[] = []
 ): Promise<{ knownKeys?: Set<string>; appModules?: Map<string, AppModuleSchema> }> {
   let knownKeys: Set<string> | undefined;
-  let appModules: Map<string, MarketplaceModuleSchema> | undefined;
   try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
-  try { appModules = await wf.getMarketplaceModuleSchemas(); } catch { /* marketplace optional */ }
+
+  // Candidate app types = types this workflow uses that aren't native/known/structural.
+  const isCovered = (type: string): boolean =>
+    STRUCTURAL_TYPES.has(type) ||
+    Boolean(knownKeys && knownKeys.has(type)) ||
+    Boolean(lookupNativeModule(type));
+
+  const actionTypes = Array.from(
+    new Set(actions.map((a) => (a && typeof a.type === 'string' ? a.type : '')).filter((t) => t && !isCovered(t)))
+  );
+  const triggerTypes = Array.from(
+    new Set(triggers.map((t) => (t && typeof t.type === 'string' ? t.type : '')).filter((t) => t && !isCovered(t)))
+  );
+
+  let appModules: Map<string, MarketplaceModuleSchema> | undefined;
+  if (actionTypes.length || triggerTypes.length) {
+    try {
+      appModules = await wf.resolveMarketplaceModuleSchemas({ actions: actionTypes, triggers: triggerTypes });
+    } catch { /* marketplace optional */ }
+  }
   return { knownKeys, appModules };
 }
 
@@ -153,7 +185,7 @@ export const workflowBuilderTools: ToolDef[] = [
       // + installed-app schemas) still block, so force can't silently persist a
       // broken workflow.
       if ((rawActions && rawActions.length) || requestedTriggers.length) {
-        const { knownKeys, appModules } = await collectValidationContext(wf);
+        const { knownKeys, appModules } = await collectValidationContext(wf, rawActions || [], requestedTriggers);
         const local = validateWorkflowGraph(rawActions || [], requestedTriggers, {
           knownKeys,
           appModules,
@@ -541,7 +573,7 @@ export const workflowBuilderTools: ToolDef[] = [
       // own validate-assets does NOT perform. Accept keys from the live module list
       // and installed-app schemas; force skips only the unknown-type rejection so the
       // remaining checks are reachable in dry-run (matches ghl_create_workflow).
-      const { knownKeys, appModules } = await collectValidationContext(wf);
+      const { knownKeys, appModules } = await collectValidationContext(wf, actions, triggers);
       const local = validateWorkflowGraph(actions, triggers, {
         knownKeys,
         appModules,
@@ -668,7 +700,7 @@ export const workflowBuilderTools: ToolDef[] = [
       const newActions = args.actions as WorkflowAction[] | undefined;
       const newTriggers = args.triggers as WorkflowTrigger[] | undefined;
       if ((newActions && newActions.length) || (newTriggers && newTriggers.length)) {
-        const { knownKeys, appModules } = await collectValidationContext(wf);
+        const { knownKeys, appModules } = await collectValidationContext(wf, newActions || [], newTriggers || []);
         const local = validateWorkflowGraph(newActions || [], newTriggers || [], {
           knownKeys,
           appModules,

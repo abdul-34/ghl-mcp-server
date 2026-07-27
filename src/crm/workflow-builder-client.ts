@@ -782,20 +782,14 @@ export class WorkflowBuilderClient {
   }
 
   /**
-   * The complete set of valid module keys (actions + triggers) for this location:
-   * the native smartlist PLUS installed marketplace-app modules. The smartlist alone
-   * omits connected apps (Todoist, ClickUp, …), which made the validator reject them
-   * as "unknown module type"; merging the marketplace index closes that gap.
+   * The set of valid NATIVE module keys (actions + triggers) for this location, from
+   * the builder's smartlist. This omits installed marketplace-app modules (Todoist,
+   * ClickUp, …) — those carry no app context in their key, so they can't be enumerated
+   * cheaply and are instead resolved per-workflow-type via resolveMarketplaceModuleSchemas.
    */
   async getKnownModuleKeys(): Promise<Set<string>> {
     const { actions, triggers } = await this.fetchModuleList();
-    const keys = new Set([...actions, ...triggers].map((m) => m.value));
-    try {
-      for (const key of (await this.getMarketplaceModuleSchemas()).keys()) keys.add(key);
-    } catch {
-      /* marketplace index optional */
-    }
-    return keys;
+    return new Set([...actions, ...triggers].map((m) => m.value));
   }
 
   async listWorkflowTriggers(workflowId: string): Promise<WorkflowTrigger[]> {
@@ -904,36 +898,80 @@ export class WorkflowBuilderClient {
     return { modules, isInstalled: wantInstalled, fellBack: false };
   }
 
+  /** Find one marketplace module by exact key within a search response, as a slim schema. */
+  private extractModuleSchema(
+    modules: unknown[],
+    key: string,
+    kind: 'action' | 'trigger'
+  ): MarketplaceModuleSchema | null {
+    const want = key.trim().toLowerCase();
+    for (const appRaw of modules) {
+      const app = appRaw && typeof appRaw === 'object' ? (appRaw as Record<string, unknown>) : null;
+      if (!app) continue;
+      for (const mod of extractMarketplaceModules(app, kind)) {
+        const hit = toMarketplaceModuleHit(app, mod, kind);
+        if (hit && hit.moduleKey.toLowerCase() === want) {
+          return { key: hit.moduleKey, kind, requiredFields: hit.requiredFields };
+        }
+      }
+    }
+    return null;
+  }
+
   /**
-   * The set of installed-app (marketplace) module schemas for this location, keyed
-   * by module key. Broad no-query fetch of actions + triggers (with the install-filter
-   * fallback), cached per session. Best-effort — a failing endpoint yields an empty
-   * map. Used to (a) accept app-typed actions in validation without force, and
-   * (b) run required-field checks against the app's own schema.
+   * Resolve installed-app (marketplace) module schemas for a SPECIFIC set of keys —
+   * the ones a workflow actually uses. A module key like "create_task___________"
+   * carries no app context, so it can't be looked up directly; instead we search the
+   * marketplace by the key's humanized label ("Create Task"), then the raw key, then
+   * the leading token, and match the exact key among the results (the same query path
+   * crm_search_workflow_modules uses, which resolves installed apps via the fallback).
+   * Cached per key across the session. Best-effort — unresolved keys are simply absent.
+   * Lets the validator (a) accept app-typed actions without force and (b) run
+   * required-field checks against the app's own schema.
    */
-  async getMarketplaceModuleSchemas(refresh = false): Promise<Map<string, MarketplaceModuleSchema>> {
-    if (this.marketplaceModuleCache && !refresh) return this.marketplaceModuleCache;
-    const index = new Map<string, MarketplaceModuleSchema>();
-    const collect = async (type: 'actions' | 'triggers'): Promise<void> => {
-      try {
-        const { modules } = await this.searchMarketplaceModules({ type, limit: 25 });
-        const kind = type === 'actions' ? 'action' : 'trigger';
-        for (const appRaw of modules) {
-          const app = appRaw && typeof appRaw === 'object' ? (appRaw as Record<string, unknown>) : null;
-          if (!app) continue;
-          for (const mod of extractMarketplaceModules(app, kind)) {
-            const hit = toMarketplaceModuleHit(app, mod, kind);
-            if (!hit) continue;
-            index.set(hit.moduleKey, { key: hit.moduleKey, kind, requiredFields: hit.requiredFields });
+  async resolveMarketplaceModuleSchemas(want: {
+    actions?: string[];
+    triggers?: string[];
+  }): Promise<Map<string, MarketplaceModuleSchema>> {
+    if (!this.marketplaceModuleCache) this.marketplaceModuleCache = new Map();
+    const cache = this.marketplaceModuleCache;
+    const out = new Map<string, MarketplaceModuleSchema>();
+
+    const resolveKind = async (keys: string[], type: 'actions' | 'triggers'): Promise<void> => {
+      const kind = type === 'actions' ? 'action' : 'trigger';
+      const seen = new Set<string>();
+      for (const raw of keys) {
+        const key = (raw || '').trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        if (cache.has(key)) {
+          out.set(key, cache.get(key)!);
+          continue;
+        }
+        const queries = [
+          this.humanize(key),
+          key,
+          key.split(/[_-]+/).filter(Boolean)[0] || '',
+        ].filter((q, i, a) => q && a.indexOf(q) === i);
+        for (const q of queries) {
+          try {
+            const { modules } = await this.searchMarketplaceModules({ type, query: q, limit: 15 });
+            const schema = this.extractModuleSchema(modules, key, kind);
+            if (schema) {
+              cache.set(key, schema);
+              out.set(key, schema);
+              break;
+            }
+          } catch {
+            /* marketplace unavailable for this query — try the next */
           }
         }
-      } catch {
-        /* marketplace unavailable — best-effort */
       }
     };
-    await Promise.all([collect('actions'), collect('triggers')]);
-    this.marketplaceModuleCache = index;
-    return index;
+
+    await resolveKind(want.actions || [], 'actions');
+    await resolveKind(want.triggers || [], 'triggers');
+    return out;
   }
 
   /**
