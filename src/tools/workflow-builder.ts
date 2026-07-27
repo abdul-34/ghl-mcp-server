@@ -122,12 +122,16 @@ export const workflowBuilderTools: ToolDef[] = [
       if (!name) throw new Error('name is required');
 
       const rawActions = args.actions as WorkflowAction[] | undefined;
+      const singleTrigger = args.trigger as WorkflowTrigger | undefined;
+      const triggers = args.triggers as WorkflowTrigger[] | undefined;
+      const requestedTriggers = triggers || (singleTrigger ? [singleTrigger] : []);
 
-      // Validate BEFORE creating the draft so we never persist a broken graph.
-      if (rawActions && rawActions.length && args.force !== true) {
+      // Validate BEFORE creating the draft so we never persist a broken graph or a
+      // dead (unknown-type) trigger. Covers actions AND triggers.
+      if (args.force !== true && ((rawActions && rawActions.length) || requestedTriggers.length)) {
         let knownKeys: Set<string> | undefined;
         try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
-        const local = validateWorkflowGraph(rawActions, [], { knownKeys });
+        const local = validateWorkflowGraph(rawActions || [], requestedTriggers, { knownKeys });
         if (!local.valid) {
           throw new Error(
             `Workflow not created — local validation failed:\n- ${local.issues.join('\n- ')}\n` +
@@ -137,10 +141,6 @@ export const workflowBuilderTools: ToolDef[] = [
       }
 
       const { id } = await wf.createWorkflow(name);
-
-      const singleTrigger = args.trigger as WorkflowTrigger | undefined;
-      const triggers = args.triggers as WorkflowTrigger[] | undefined;
-      const requestedTriggers = triggers || (singleTrigger ? [singleTrigger] : []);
       const publish = args.publish as boolean | undefined;
 
       try {
@@ -369,29 +369,37 @@ export const workflowBuilderTools: ToolDef[] = [
       'Call after crm_search_workflow_modules. Returns inputs/filters/options needed to build attributes, ' +
       'with runtime code and customGenerator blobs stripped. Prefer this over asking search for full schemas.',
     properties: {
-      key: { type: 'string', description: 'Exact module key from search results, for example zoom_create_meeting' },
+      key: { type: 'string', description: 'Exact module key from search results (the `moduleKey` field), for example zoom_create_meeting' },
+      moduleKey: { type: 'string', description: 'Alias for `key` — accepts the exact field name returned by crm_search_workflow_modules.' },
       type: { type: 'string', enum: ['actions', 'triggers'], description: 'Module kind (required)' },
-      query: { type: 'string', description: 'Optional search hint if the key alone is too generic. Defaults to the key. Example: Zoom' },
+      query: { type: 'string', description: 'Optional search hint if the key alone is too generic. Defaults to the key, then the key\'s app prefix. Example: Zoom' },
       isInstalled: { type: 'boolean', description: 'Search installed apps only (default true)' },
     },
-    required: ['key', 'type'],
+    required: ['type'],
     handler: async (client, args) => {
       const wf = client.workflowBuilder();
-      const key = args.key as string;
+      const key = (args.key as string) || (args.moduleKey as string);
       const type = args.type as 'actions' | 'triggers';
-      if (!key) throw new Error('key is required');
+      if (!key) throw new Error('key (or moduleKey) is required');
       if (type !== 'actions' && type !== 'triggers') throw new Error('type must be actions or triggers');
 
-      const query = (args.query as string | undefined)?.trim() || key;
-      const apps = await wf.searchMarketplaceModules({
-        type,
-        query,
-        isInstalled: args.isInstalled as boolean | undefined,
-        skip: 0,
-        limit: 15,
-      });
+      const kind = type === 'actions' ? 'action' : 'trigger';
+      const runSearch = async (q: string) => {
+        const apps = await wf.searchMarketplaceModules({ type, query: q, isInstalled: args.isInstalled as boolean | undefined, skip: 0, limit: 15 });
+        return findMarketplaceModuleByKey(apps, key, kind);
+      };
 
-      const found = findMarketplaceModuleByKey(apps, key, type === 'actions' ? 'action' : 'trigger');
+      // Try the explicit query (or the key); if that misses, retry with the key's
+      // app prefix (e.g. brevo_sms → "brevo") so the fetch matches what search finds.
+      let found = await runSearch((args.query as string | undefined)?.trim() || key);
+      if (!found.found) {
+        const prefix = key.split(/[_-]/)[0];
+        if (prefix && prefix.length >= 2 && prefix.toLowerCase() !== key.toLowerCase()) {
+          const alt = await runSearch(prefix);
+          if (alt.found || (!(found.matches || []).length && (alt.matches || []).length)) found = alt;
+        }
+      }
+
       if (!found.found) {
         return {
           source: 'live-marketplace-module-search',
@@ -602,10 +610,11 @@ export const workflowBuilderTools: ToolDef[] = [
       if (!workflowId) throw new Error('workflowId is required');
 
       const newActions = args.actions as WorkflowAction[] | undefined;
-      if (newActions && newActions.length && args.force !== true) {
+      const newTriggers = args.triggers as WorkflowTrigger[] | undefined;
+      if (args.force !== true && ((newActions && newActions.length) || (newTriggers && newTriggers.length))) {
         let knownKeys: Set<string> | undefined;
         try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
-        const local = validateWorkflowGraph(newActions, [], { knownKeys });
+        const local = validateWorkflowGraph(newActions || [], newTriggers || [], { knownKeys });
         if (!local.valid) {
           throw new Error(
             `Workflow not updated — local validation failed:\n- ${local.issues.join('\n- ')}\n` +
@@ -683,13 +692,15 @@ export const workflowBuilderTools: ToolDef[] = [
     properties: {
       workflowId: { type: 'string', description: 'The source workflow ID to clone' },
       newName: { type: 'string', description: 'Name for the cloned workflow (default: "{original name} (copy)")' },
+      name: { type: 'string', description: 'Alias for newName.' },
     },
     required: ['workflowId'],
     handler: async (client, args) => {
       const wf = client.workflowBuilder();
       const workflowId = args.workflowId as string;
       if (!workflowId) throw new Error('workflowId is required');
-      const workflow = await wf.cloneWorkflow(workflowId, args.newName as string | undefined);
+      const newName = (args.newName as string | undefined) || (args.name as string | undefined);
+      const workflow = await wf.cloneWorkflow(workflowId, newName);
       return {
         message: `Workflow cloned as "${workflow.name}"`,
         sourceId: workflowId,
