@@ -923,8 +923,9 @@ export class WorkflowBuilderClient {
    * the ones a workflow actually uses. A module key like "create_task___________"
    * carries no app context, so it can't be looked up directly; instead we search the
    * marketplace by the key's humanized label ("Create Task"), then the raw key, then
-   * the leading token, and match the exact key among the results (the same query path
-   * crm_search_workflow_modules uses, which resolves installed apps via the fallback).
+   * the leading token, and match the exact key among the FULL-catalog results
+   * (isInstalled:false — the install filter is unreliable and adds nothing when we
+   * match by exact key; searching the full catalog reaches app actions AND triggers).
    * Cached per key across the session. Best-effort — unresolved keys are simply absent.
    * Lets the validator (a) accept app-typed actions without force and (b) run
    * required-field checks against the app's own schema.
@@ -955,7 +956,12 @@ export class WorkflowBuilderClient {
         ].filter((q, i, a) => q && a.indexOf(q) === i);
         for (const q of queries) {
           try {
-            const { modules } = await this.searchMarketplaceModules({ type, query: q, limit: 15 });
+            // Search the FULL catalog (isInstalled:false), not the installed-only set.
+            // We match by exact key, so the install filter adds no value — and it is
+            // unreliable: for triggers it returns a non-empty-but-wrong set (so the
+            // empty-fallback never fires) and the wanted app key is simply absent.
+            // Going straight to the full catalog reaches app actions AND triggers alike.
+            const { modules } = await this.searchMarketplaceModules({ type, query: q, isInstalled: false, limit: 15 });
             const schema = this.extractModuleSchema(modules, key, kind);
             if (schema) {
               cache.set(key, schema);
