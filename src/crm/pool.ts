@@ -166,9 +166,15 @@ export class CRMClientPool {
       // Route rotated tokens: Firebase → the sub-account row; builder JWT → the
       // agency row (shared across all the owner's sub-accounts).
       persist: async (patch) => {
-        if (patch.firebaseRefreshToken) {
-          await updateWorkflowCreds(subaccountId, { firebaseRefreshToken: patch.firebaseRefreshToken });
+        // Firebase refresh + resolved context ids → the sub-account row.
+        if (patch.firebaseRefreshToken || patch.companyId || patch.userId) {
+          await updateWorkflowCreds(subaccountId, {
+            firebaseRefreshToken: patch.firebaseRefreshToken,
+            companyId: patch.companyId,
+            userId: patch.userId,
+          });
         }
+        // Builder JWT is agency-wide → the agency row.
         if ((patch.authToken || patch.refreshToken) && ownerId) {
           await storeAgencyBuilderToken(ownerId, { authToken: patch.authToken, refreshToken: patch.refreshToken });
         }

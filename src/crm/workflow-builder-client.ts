@@ -86,11 +86,15 @@ export interface WorkflowExample {
   workflowName: string;
 }
 
-/** Rotated tokens handed to the caller to persist (e.g. to Supabase). */
+/** Rotated tokens / derived context handed to the caller to persist (e.g. to Supabase). */
 export interface WorkflowCredsPatch {
   firebaseRefreshToken?: string;
   refreshToken?: string;
   authToken?: string;
+  /** Resolved GHL company (agency) id — persisted to the sub-account row. */
+  companyId?: string;
+  /** Resolved GHL user id — persisted to the sub-account row. */
+  userId?: string;
 }
 
 export interface WorkflowBuilderConfig {
@@ -1029,9 +1033,17 @@ export class WorkflowBuilderClient {
   }> {
     // Ensure a token exists before attempting to derive user claims from it.
     await this.getHeaders();
+
+    // user id: prefer the stored value, else the token claim. Persist a freshly
+    // derived value so we don't re-decode every session.
     let userId = this.config.userId || this.readJwtClaim(
       ['authClassId', 'user_id', 'userId', 'sub']
     );
+    if (userId && !this.config.userId) {
+      this.config.userId = userId;
+      await this.persist({ userId });
+    }
+
     let companyId = this.config.companyId ||
       (typeof current?.companyId === 'string' ? current.companyId : undefined) ||
       (typeof current?.company_id === 'string' ? current.company_id : undefined);
@@ -1041,6 +1053,19 @@ export class WorkflowBuilderClient {
       if (typeof candidate === 'number') companyAge = candidate;
     }
 
+    // Authoritative company id from the location itself (via the PIT) — works even
+    // with zero existing workflows, and doesn't depend on the browser scrape.
+    // Resolved once, then persisted to the sub-account row.
+    if (!companyId) {
+      const fromLocation = await this.resolveCompanyIdFromLocation();
+      if (fromLocation) {
+        companyId = fromLocation;
+        this.config.companyId = fromLocation;
+        await this.persist({ companyId: fromLocation });
+      }
+    }
+
+    // Fallback: read from an existing workflow row (also the source for companyAge).
     if (!companyId || companyAge === undefined) {
       const result = await this.listWorkflows({ limit: 1 });
       const row = result.rows[0] as WorkflowListItem & Record<string, unknown> | undefined;
@@ -1054,10 +1079,36 @@ export class WorkflowBuilderClient {
       throw new Error('Workflow writes require a captured GHL user id or a JWT containing authClassId.');
     }
     if (!companyId) {
-      throw new Error('Workflow writes and module search require a captured GHL company id.');
+      throw new Error('Workflow writes and module search require a GHL company id (could not resolve from the location or existing workflows).');
     }
 
     return { userId, companyId, companyAge: companyAge ?? 12 };
+  }
+
+  /**
+   * Resolve the owning company (agency) id from the sub-account's location via the
+   * PUBLIC API, using the PIT we already hold. Authoritative and independent of the
+   * browser capture or any existing workflows. Best-effort — returns undefined on
+   * any error (caller falls back to workflow rows).
+   */
+  private async resolveCompanyIdFromLocation(): Promise<string | undefined> {
+    try {
+      const res = await fetch(`https://services.leadconnectorhq.com/locations/${this.config.locationId}`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${this.config.apiKey}`,
+          Version: '2021-07-28',
+          Accept: 'application/json',
+        },
+      });
+      if (!res.ok) return undefined;
+      const data = (await res.json()) as Record<string, unknown>;
+      const loc = (data.location as Record<string, unknown> | undefined) ?? data;
+      const companyId = loc?.companyId ?? loc?.company_id;
+      return typeof companyId === 'string' && companyId ? companyId : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private readJwtClaim(names: string[]): string | undefined {

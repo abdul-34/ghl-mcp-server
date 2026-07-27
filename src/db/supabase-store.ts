@@ -207,6 +207,9 @@ export async function updateWorkflowCreds(subaccountId: string, patch: WorkflowC
   if (patch.firebaseRefreshToken) update.base_refresh_token = encryptToken(patch.firebaseRefreshToken);
   if (patch.refreshToken) update.auth_encrypted_refresh_token = encryptToken(patch.refreshToken);
   if (patch.authToken) update.auth_encrypted_token = encryptToken(patch.authToken);
+  // Resolved context ids are low-sensitivity — stored plaintext.
+  if (patch.companyId) update.ghl_company_id = patch.companyId;
+  if (patch.userId) update.ghl_user_id = patch.userId;
 
   const { error } = await getSupabase().from('subaccounts').update(update).eq('id', subaccountId);
   if (error) {
