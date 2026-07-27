@@ -250,6 +250,19 @@ function tokenize(query: string): string[] {
     .filter(token => token.length >= 2);
 }
 
+// Third-party integration modules (marketplace apps) vs. core native GHL modules.
+// Native modules should rank first for generic verbs like "add tag" / "send sms".
+const INTEGRATION_PREFIX =
+  /^(lc_|asana|notion|jira|slack|google|googlecontact|hubspot|monday|clickup|klaviyo|calendly|zoom|trello|airtable|typeform|basecamp|linear|vapi|apify|survey_monkey|surveymonkey|browse_ai|manus|housecall|shopify|mailchimp|activecampaign|pipedrive|salesforce|quickbooks|xero|stripe|twilio|sendgrid|whatsapp|telegram|discord|webhook_)/i;
+
+export function isIntegrationKey(key: string): boolean {
+  return INTEGRATION_PREFIX.test(key || '');
+}
+
+function isIntegrationModule(mod: NativeWorkflowModule): boolean {
+  return isIntegrationKey(mod.key);
+}
+
 function scoreModule(mod: NativeWorkflowModule, query: string, tokens: string[]): number {
   const key = mod.key.toLowerCase();
   const name = moduleName(mod).toLowerCase();
@@ -276,10 +289,27 @@ function scoreModule(mod: NativeWorkflowModule, query: string, tokens: string[])
     if (haystack.includes(token)) score += 10;
   }
 
+  // Rank core native GHL modules above third-party integration modules for the
+  // same verb (e.g. native "sms" over an app's "send message"). Only when the
+  // module actually matched the query, so it never surfaces irrelevant natives.
+  if (score > 1 && !isIntegrationModule(mod)) score += 250;
+
   // Keep hidden modules discoverable but ranked below visible equivalents.
   if (mod.hidden && score > 1) score = Math.max(1, score - 150);
 
   return score;
+}
+
+/**
+ * Cheap exact-key lookup (no search fallback). Returns the module or undefined.
+ * Used by the workflow validator to check that an action `type` is a real module.
+ */
+export function lookupNativeModule(key: string, kind?: NativeModuleKind): NativeWorkflowModule | undefined {
+  const k = asString(key).trim();
+  if (!k) return undefined;
+  const list = loadCatalog().byKey.get(k) || [];
+  const filtered = kind ? list.filter((m) => m.kind === kind) : list;
+  return filtered[0];
 }
 
 function toSearchHit(mod: NativeWorkflowModule, score: number): NativeModuleSearchHit {

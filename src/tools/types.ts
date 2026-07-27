@@ -15,6 +15,12 @@ export type ToolHandler = (client: CRMClient, args: Record<string, any>) => Prom
 export interface ToolDef {
   tool: Tool;
   handler: ToolHandler;
+  /**
+   * When false, the tool does not operate on a sub-account: callTool skips the
+   * locationId requirement and the pool lookup, and the handler receives no
+   * client. Used for local, location-independent tools (e.g. the native catalog).
+   */
+  requiresLocation?: boolean;
 }
 
 type JsonSchema = Record<string, any>;
@@ -35,9 +41,16 @@ export function defineTool(opts: {
   properties?: Record<string, JsonSchema>;
   required?: string[];
   handler: ToolHandler;
+  /** Default true. Set false for location-independent tools (no locationId, no pool). */
+  requiresLocation?: boolean;
 }): ToolDef {
-  const properties = { locationId: locationIdProp, ...(opts.properties || {}) };
-  const required = Array.from(new Set(['locationId', ...(opts.required || [])]));
+  const requiresLocation = opts.requiresLocation !== false;
+  const properties = requiresLocation
+    ? { locationId: locationIdProp, ...(opts.properties || {}) }
+    : { ...(opts.properties || {}) };
+  const required = requiresLocation
+    ? Array.from(new Set(['locationId', ...(opts.required || [])]))
+    : Array.from(new Set(opts.required || []));
   return {
     tool: {
       name: opts.name,
@@ -50,6 +63,7 @@ export function defineTool(opts: {
       },
     },
     handler: opts.handler,
+    requiresLocation,
   };
 }
 

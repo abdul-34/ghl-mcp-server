@@ -17,11 +17,23 @@ import {
   getNativeWorkflowModule,
   listNativeWorkflowSections,
   searchNativeWorkflowModules,
+  isIntegrationKey,
 } from '../catalog/native-workflow-catalog.js';
+
+/** locationId as an OPTIONAL arg: pass it to fold in the complete live module list. */
+const OPTIONAL_LOCATION = {
+  locationId: {
+    type: 'string',
+    description:
+      'Optional. Pass the sub-account id to merge the COMPLETE live module list (all valid keys for that ' +
+      'account, e.g. add_contact_tag, if_else) on top of the static catalog. Omit for static-only results.',
+  },
+} as const;
 import {
   findMarketplaceModuleByKey,
   slimMarketplaceSearchResults,
 } from '../catalog/marketplace-module-slim.js';
+import { validateWorkflowGraph } from '../catalog/workflow-validator.js';
 
 const WORKFLOW_ACTION_SCHEMA: Record<string, any> = {
   type: 'object',
@@ -101,6 +113,7 @@ export const workflowBuilderTools: ToolDef[] = [
         items: WORKFLOW_ACTION_SCHEMA,
       },
       publish: { type: 'boolean', description: 'If true, publish the workflow immediately after creation (default: draft)' },
+      force: { type: 'boolean', description: 'Skip local validation (unknown types / missing required fields / broken graph). Use only for freshly-installed marketplace apps not yet in the catalog.' },
     },
     required: ['name'],
     handler: async (client, args) => {
@@ -108,9 +121,23 @@ export const workflowBuilderTools: ToolDef[] = [
       const name = args.name as string;
       if (!name) throw new Error('name is required');
 
+      const rawActions = args.actions as WorkflowAction[] | undefined;
+
+      // Validate BEFORE creating the draft so we never persist a broken graph.
+      if (rawActions && rawActions.length && args.force !== true) {
+        let knownKeys: Set<string> | undefined;
+        try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
+        const local = validateWorkflowGraph(rawActions, [], { knownKeys });
+        if (!local.valid) {
+          throw new Error(
+            `Workflow not created — local validation failed:\n- ${local.issues.join('\n- ')}\n` +
+              `Fix these (use crm_get_native_workflow_module / crm_find_workflow_examples), or pass force:true to override.`
+          );
+        }
+      }
+
       const { id } = await wf.createWorkflow(name);
 
-      const rawActions = args.actions as WorkflowAction[] | undefined;
       const singleTrigger = args.trigger as WorkflowTrigger | undefined;
       const triggers = args.triggers as WorkflowTrigger[] | undefined;
       const requestedTriggers = triggers || (singleTrigger ? [singleTrigger] : []);
@@ -160,19 +187,79 @@ export const workflowBuilderTools: ToolDef[] = [
       section: { type: 'string', description: 'Optional section/app filter, for example Asana, Calendly, or affiliate' },
       limit: { type: 'number', minimum: 1, maximum: 50, description: 'Max matches to return (default 15)' },
       listSections: { type: 'boolean', description: 'If true, return available catalog sections instead of module matches' },
+      ...OPTIONAL_LOCATION,
     },
-    handler: async (_client, args) => {
+    requiresLocation: false,
+    handler: async (client, args) => {
       const type = (args.type as 'actions' | 'triggers' | 'both' | undefined) || 'both';
       if (type !== 'actions' && type !== 'triggers' && type !== 'both') {
         throw new Error('type must be actions, triggers, or both');
       }
       if (args.listSections === true) return listNativeWorkflowSections(type);
-      return searchNativeWorkflowModules({
-        query: args.query as string | undefined,
+
+      const limit = Math.min(Math.max(Number(args.limit ?? 15), 1), 50);
+      const query = (args.query as string | undefined) || '';
+      const staticRes = searchNativeWorkflowModules({
+        query,
         type,
         section: args.section as string | undefined,
-        limit: args.limit as number | undefined,
+        limit: limit * 2,
       });
+      let results: any[] = staticRes.results;
+      let source = staticRes.source;
+
+      // Merge the complete LIVE module list when a client is available. The static
+      // catalog only has ~239 actions; the live list has all ~381 (add_contact_tag,
+      // if_else, …). Live-only entries have a label but no static schema.
+      if (client && !args.section) {
+        try {
+          const wf = client.workflowBuilder();
+          const listed = await wf.fetchModuleList();
+          const live = type === 'triggers' ? listed.triggers : type === 'actions' ? listed.actions : [...listed.actions, ...listed.triggers];
+          const staticKeys = new Set(results.map((r) => r.key));
+          const q = query.trim().toLowerCase();
+          const tokens = q.split(/[^a-z0-9]+/).filter((t) => t.length >= 2);
+          const scoreLive = (value: string, label: string): number => {
+            const k = value.toLowerCase();
+            const l = label.toLowerCase();
+            if (!q) return 1;
+            let s = 0;
+            if (k === q || l === q) s += 1000;
+            if (k.includes(q)) s += 400;
+            if (l.includes(q)) s += 350;
+            let all = tokens.length > 0;
+            for (const t of tokens) {
+              const inK = k.includes(t);
+              const inL = l.includes(t);
+              if (inK) s += 60;
+              if (inL) s += 55;
+              if (!inK && !inL) all = false;
+            }
+            if (all) s += 200;
+            if (!isIntegrationKey(value)) s += 300; // native boost
+            return s;
+          };
+          const liveHits = live
+            .filter((m) => !staticKeys.has(m.value))
+            .map((m) => ({ key: m.value, name: m.label, section: 'live', source: 'live-list', hasSchema: false, score: scoreLive(m.value, m.label) }))
+            .filter((h) => !q || h.score > 1);
+          results = [...results, ...liveHits].sort((a, b) => (b.score || 0) - (a.score || 0));
+          source = 'static-catalog + live-module-list';
+        } catch {
+          /* live list unavailable — static-only */
+        }
+      }
+
+      results = results.slice(0, limit);
+      return {
+        source,
+        resultCount: results.length,
+        results,
+        note:
+          'Entries with hasSchema:false come from the live module list (valid key + label, no static input ' +
+          'schema) — call crm_find_workflow_examples for a real payload. Others have full inputs via ' +
+          'crm_get_native_workflow_module.',
+      };
     },
   }),
 
@@ -189,16 +276,44 @@ export const workflowBuilderTools: ToolDef[] = [
     properties: {
       key: { type: 'string', description: 'Exact module key, for example am-add-lead or asana_ia_asana_create_task' },
       type: { type: 'string', enum: ['actions', 'triggers', 'both'], description: 'Optional kind filter when the same key might exist in both catalogs' },
+      ...OPTIONAL_LOCATION,
     },
     required: ['key'],
-    handler: async (_client, args) => {
+    requiresLocation: false,
+    handler: async (client, args) => {
       const key = args.key as string;
       if (!key) throw new Error('key is required');
       const type = (args.type as 'actions' | 'triggers' | 'both' | undefined) || 'both';
       if (type !== 'actions' && type !== 'triggers' && type !== 'both') {
         throw new Error('type must be actions, triggers, or both');
       }
-      return getNativeWorkflowModule({ key, type });
+      const result = getNativeWorkflowModule({ key, type });
+
+      // Static miss but a client is available → check the live module list. The key
+      // may be a real module (e.g. add_contact_tag) whose schema just isn't bundled.
+      if (!result.found && client) {
+        try {
+          const wf = client.workflowBuilder();
+          const listed = await wf.fetchModuleList();
+          const hit = [...listed.actions, ...listed.triggers].find((m) => m.value === key);
+          if (hit) {
+            return {
+              source: 'live-module-list',
+              found: true,
+              key,
+              label: hit.label,
+              hasStaticSchema: false,
+              resolution:
+                `"${hit.label}" is a valid module, but its input schema isn't in the static catalog. ` +
+                `Call crm_find_workflow_examples with key "${key}" to get a real payload from your workflows.`,
+              note: 'Resolved from the live module list (no bundled input schema).',
+            };
+          }
+        } catch {
+          /* live list unavailable — return the static miss */
+        }
+      }
+      return result;
     },
   }),
 
@@ -363,13 +478,36 @@ export const workflowBuilderTools: ToolDef[] = [
       const wf = client.workflowBuilder();
       const actions = (args.actions as WorkflowAction[] | undefined) || [];
       const triggers = (args.triggers as WorkflowTrigger[] | undefined) || [];
-      const result = await wf.validateWorkflow(actions, triggers);
+
+      // Local checks (unknown types, required fields, graph integrity) that GHL's
+      // own validate-assets does NOT perform. Accept keys from the live module list.
+      let knownKeys: Set<string> | undefined;
+      try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
+      const local = validateWorkflowGraph(actions, triggers, { knownKeys });
+
+      // Server preflight (GHL's own rules). Tolerate failures so local issues
+      // still surface if the server call errors.
+      let serverValid = true;
+      let serverIssues: string[] = [];
+      try {
+        const server = await wf.validateWorkflow(actions, triggers);
+        serverValid = server.valid;
+        serverIssues = server.issues;
+      } catch (err: any) {
+        serverValid = false;
+        serverIssues = [`validate-assets call failed: ${err.message}`];
+      }
+
+      const issues = [...local.issues, ...serverIssues];
+      const valid = local.valid && serverValid;
       return {
-        valid: result.valid,
-        issues: result.issues,
-        note: result.valid
-          ? 'validate-assets found no issues — safe to create/update.'
-          : 'Fix the issues above. For correct attribute values use crm_find_workflow_examples.',
+        valid,
+        localIssues: local.issues,
+        serverIssues,
+        issues,
+        note: valid
+          ? 'No issues found (local checks + GHL validate-assets) — safe to create/update.'
+          : 'Fix the issues above before creating. For correct attribute values use crm_find_workflow_examples; for the right module key use crm_search_native_workflow_modules.',
       };
     },
   }),
@@ -455,12 +593,27 @@ export const workflowBuilderTools: ToolDef[] = [
       actions: { type: 'array', description: 'New actions array — replaces all existing actions', items: WORKFLOW_ACTION_SCHEMA },
       triggers: { type: 'array', description: 'New triggers — replaces existing trigger records through dedicated trigger CRUD', items: WORKFLOW_TRIGGER_SCHEMA },
       status: { type: 'string', enum: ['draft', 'published'], description: 'Set workflow status' },
+      force: { type: 'boolean', description: 'Skip local validation (unknown types / missing required fields / broken graph).' },
     },
     required: ['workflowId'],
     handler: async (client, args) => {
       const wf = client.workflowBuilder();
       const workflowId = args.workflowId as string;
       if (!workflowId) throw new Error('workflowId is required');
+
+      const newActions = args.actions as WorkflowAction[] | undefined;
+      if (newActions && newActions.length && args.force !== true) {
+        let knownKeys: Set<string> | undefined;
+        try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
+        const local = validateWorkflowGraph(newActions, [], { knownKeys });
+        if (!local.valid) {
+          throw new Error(
+            `Workflow not updated — local validation failed:\n- ${local.issues.join('\n- ')}\n` +
+              `Fix these, or pass force:true to override.`
+          );
+        }
+      }
+
       const workflow = await wf.updateWorkflow(workflowId, {
         name: args.name as string | undefined,
         actions: args.actions as WorkflowAction[] | undefined,

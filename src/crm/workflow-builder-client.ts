@@ -74,6 +74,12 @@ export interface WorkflowFull {
   [key: string]: unknown;
 }
 
+/** One entry from the live module list (the builder's action/trigger picker). */
+export interface ModuleListEntry {
+  value: string; // module key
+  label: string; // display name
+}
+
 /** A real action/trigger payload mined from an existing workflow. */
 export interface WorkflowExample {
   kind: 'action' | 'trigger';
@@ -132,6 +138,8 @@ export class WorkflowBuilderClient {
   private marketplaceAuthMode: 'workflow' | 'builder' | null = null;
   /** Cached index of real action/trigger payloads mined from live workflows. */
   private exampleIndex: Map<string, WorkflowExample[]> | null = null;
+  /** Cached live module list (the complete set of valid action/trigger keys). */
+  private moduleListCache: { actions: ModuleListEntry[]; triggers: ModuleListEntry[] } | null = null;
 
   private static readonly API_ORIGIN = 'https://backend.leadconnectorhq.com';
   private static readonly BUILDER_ORIGIN = 'https://client-app-automation-workflows.leadconnectorhq.com';
@@ -722,6 +730,42 @@ export class WorkflowBuilderClient {
       Array.from(index.values()).flat().map((e) => e.workflowId)
     ).size;
     return { type: opts.type, workflowsScanned, examples };
+  }
+
+  /**
+   * Fetch the complete live module list (the builder's action/trigger picker) from
+   * backend.leadconnectorhq.com/workflows-marketplace/assets/smartlist/{actions,triggers}.
+   * Returns { value: key, label } entries — the authoritative, complete set of valid
+   * module keys for this location (far more than the static catalog). Cached per session.
+   * Best-effort: a failing endpoint yields an empty list rather than throwing.
+   */
+  async fetchModuleList(refresh = false): Promise<{ actions: ModuleListEntry[]; triggers: ModuleListEntry[] }> {
+    if (this.moduleListCache && !refresh) return this.moduleListCache;
+    const loc = this.config.locationId;
+    const get = async (kind: 'actions' | 'triggers'): Promise<ModuleListEntry[]> => {
+      try {
+        const { data } = await this.request<unknown>(
+          'GET',
+          `/workflows-marketplace/assets/smartlist/${kind}?locationId=${encodeURIComponent(loc)}`
+        );
+        if (!Array.isArray(data)) return [];
+        return data
+          .map((x) => (x && typeof x === 'object' ? (x as Record<string, unknown>) : {}))
+          .filter((x) => typeof x.value === 'string' && x.value)
+          .map((x) => ({ value: x.value as string, label: typeof x.label === 'string' ? (x.label as string) : (x.value as string) }));
+      } catch {
+        return [];
+      }
+    };
+    const [actions, triggers] = await Promise.all([get('actions'), get('triggers')]);
+    this.moduleListCache = { actions, triggers };
+    return this.moduleListCache;
+  }
+
+  /** The complete set of valid module keys (actions + triggers) for this location. */
+  async getKnownModuleKeys(): Promise<Set<string>> {
+    const { actions, triggers } = await this.fetchModuleList();
+    return new Set([...actions, ...triggers].map((m) => m.value));
   }
 
   async listWorkflowTriggers(workflowId: string): Promise<WorkflowTrigger[]> {

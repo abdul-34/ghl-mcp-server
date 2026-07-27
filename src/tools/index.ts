@@ -13,6 +13,7 @@
 
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { CRMClientPool } from '../crm/pool.js';
+import { CRMClient } from '../crm/client.js';
 import { ToolDef } from './types.js';
 import { GENERATED_TOOLS } from './generated/index.js';
 import {
@@ -136,6 +137,15 @@ async function dispatchTool(
 
   const def = REGISTRY.get(name);
   if (!def) throw new Error(`Unknown tool "${name}".`);
+
+  // Location-independent tools (e.g. the native catalog) don't need a sub-account,
+  // but if a valid locationId IS supplied they still get a client so they can merge
+  // live data (e.g. the complete module list).
+  if (def.requiresLocation === false) {
+    const loc = typeof args.locationId === 'string' ? args.locationId : undefined;
+    const client = loc && pool.has(loc) ? pool.get(loc) : (undefined as unknown as CRMClient);
+    return def.handler(client, args);
+  }
 
   const locationId = typeof args.locationId === 'string' ? args.locationId : undefined;
   if (!locationId) {
