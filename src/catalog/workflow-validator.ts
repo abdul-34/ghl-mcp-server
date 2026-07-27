@@ -46,11 +46,16 @@ const STRUCTURAL_TYPES = new Set([
   'goto', 'if_else', 'condition', 'branch', 'transition', 'filter', 'fork', 'join', 'end', 'wait',
 ]);
 
-/** Point the caller at the right discovery tool based on how the key looks. */
+/**
+ * Point the caller at the discovery tools. An unknown key can't be reliably
+ * classified as native-vs-app (integration prefix lists are never complete —
+ * e.g. "brevo_sms" looks like an app but matches no prefix), so always name
+ * BOTH search tools; lead with whichever the key most looks like.
+ */
 function discoveryHint(type: string): string {
-  return isIntegrationKey(type)
-    ? 'crm_search_workflow_modules (installed marketplace app)'
-    : 'crm_search_native_workflow_modules';
+  const app = 'crm_search_workflow_modules (installed marketplace apps, e.g. brevo/klaviyo/slack)';
+  const native = 'crm_search_native_workflow_modules (core GHL actions/triggers)';
+  return isIntegrationKey(type) ? `${app}, or ${native}` : `${native}, or ${app}`;
 }
 
 /** True if `type` is a valid module of the given kind (static catalog or live list). */
@@ -143,6 +148,31 @@ export function validateWorkflowGraph(
         issues.push(`${label}: goto is missing attributes.targetNodeId.`);
       } else if (!ids.has(target)) {
         issues.push(`${label}: goto.targetNodeId "${target}" points to a node no action declares.`);
+      }
+    }
+
+    // (5) multipath symmetry: every branch declared in attributes.transitions[]
+    //     must be routed by this node's "next" array. A transition that isn't in
+    //     "next" is an orphaned branch — contacts taking it are silently dropped.
+    const nodeAttrs = a.attributes && typeof a.attributes === 'object' ? (a.attributes as Record<string, unknown>) : {};
+    const transitions = Array.isArray(nodeAttrs.transitions) ? (nodeAttrs.transitions as unknown[]) : [];
+    if (transitions.length) {
+      const nextSet = new Set<string>();
+      if (typeof a.next === 'string') nextSet.add(a.next);
+      else if (Array.isArray(a.next)) for (const x of a.next) if (typeof x === 'string') nextSet.add(x);
+      for (const tr of transitions) {
+        if (!tr || typeof tr !== 'object') continue;
+        const trec = tr as Record<string, unknown>;
+        const tid = trec.id;
+        if (typeof tid !== 'string' || !tid) continue;
+        if (!nextSet.has(tid)) {
+          const trName = typeof trec.name === 'string' && trec.name ? trec.name : tid;
+          issues.push(
+            `${label}: multipath branch "${trName}" (transition id "${tid}") is declared in ` +
+              `attributes.transitions but is not routed in "next" — contacts taking this branch are ` +
+              `silently dropped. Add "${tid}" to this action's "next" array.`
+          );
+        }
       }
     }
   });
