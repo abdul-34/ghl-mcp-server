@@ -64,6 +64,22 @@ function isKnownModule(type: string, kind: 'action' | 'trigger', knownKeys?: Set
   return Boolean(knownKeys && knownKeys.has(type));
 }
 
+/** Slim schema for an installed marketplace-app module — enough to check required fields. */
+export interface AppModuleSchema {
+  requiredFields: string[];
+}
+
+export interface ValidateOptions {
+  /** Valid module keys from the live list (native smartlist + installed apps). */
+  knownKeys?: Set<string>;
+  /** Installed marketplace-app module schemas, keyed by module key. Lets required-field
+   *  checks run on app-typed actions the static catalog doesn't describe. */
+  appModules?: Map<string, AppModuleSchema>;
+  /** force mode: suppress ONLY the "unknown module type" rejection. Graph checks and
+   *  required-field checks (native catalog + installed-app schemas) still run. */
+  ignoreUnknownTypes?: boolean;
+}
+
 /**
  * Validate a workflow graph locally — the checks GHL's validate-assets skips.
  * Actions: type existence, required fields, dangling next/parentKey, goto targets,
@@ -72,7 +88,7 @@ function isKnownModule(type: string, kind: 'action' | 'trigger', knownKeys?: Set
 export function validateWorkflowGraph(
   actions: WorkflowAction[] = [],
   triggers: WorkflowTrigger[] = [],
-  opts: { knownKeys?: Set<string> } = {}
+  opts: ValidateOptions = {}
 ): LocalValidation {
   const issues: string[] = [];
   const ids = new Set<string>();
@@ -99,15 +115,33 @@ export function validateWorkflowGraph(
       return;
     }
 
-    // (1) unknown module type — accept the static catalog, live list, or a structural type.
+    // (1) unknown module type — accept the static catalog, live list, installed apps,
+    //     or a structural type. In force (ignoreUnknownTypes) mode we suppress the
+    //     rejection but STILL run any required-field checks we can.
     const mod = lookupNativeModule(a.type, 'action') || lookupNativeModule(a.type);
+    const appMod = opts.appModules?.get(a.type);
     if (!mod) {
-      if (!STRUCTURAL_TYPES.has(a.type) && !(opts.knownKeys && opts.knownKeys.has(a.type))) {
+      const known =
+        STRUCTURAL_TYPES.has(a.type) || Boolean(opts.knownKeys && opts.knownKeys.has(a.type)) || Boolean(appMod);
+      if (!known && !opts.ignoreUnknownTypes) {
         issues.push(
           `${label}: unknown module type — not found in the workflow catalog or live module list. ` +
             `Discover the correct key with ${discoveryHint(a.type)}, or pass force:true if this is a ` +
             `freshly-installed marketplace app.`
         );
+      }
+      // Required-field check for installed marketplace apps, using the app's own
+      // schema (fetched from the marketplace). Runs even under force.
+      if (appMod && appMod.requiredFields.length) {
+        const attrs = a.attributes && typeof a.attributes === 'object' ? (a.attributes as Record<string, unknown>) : {};
+        for (const field of appMod.requiredFields) {
+          const f = String(field || '').trim();
+          if (!f) continue;
+          const v = attrs[f];
+          if (v === undefined || v === null || v === '') {
+            issues.push(`${label}: missing required field "${f}" (required by the installed app's schema).`);
+          }
+        }
       }
     } else {
       // (2) required fields (skip dynamic modules — values are resolved live)
@@ -190,11 +224,15 @@ export function validateWorkflowGraph(
     }
 
     // (1) unknown trigger type — same check as actions, applied to triggers.
-    if (!isKnownModule(t.type, 'trigger', opts.knownKeys)) {
-      issues.push(
-        `${label}: unknown trigger type — a workflow with this trigger can never fire. ` +
-          `Discover the correct key with ${discoveryHint(t.type)}.`
-      );
+    const triggerKnown = isKnownModule(t.type, 'trigger', opts.knownKeys) || Boolean(opts.appModules?.has(t.type));
+    if (!triggerKnown) {
+      if (!opts.ignoreUnknownTypes) {
+        issues.push(
+          `${label}: unknown trigger type — a workflow with this trigger can never fire. ` +
+            `Discover the correct key with ${discoveryHint(t.type)}, or pass force:true if this is a ` +
+            `freshly-installed marketplace app.`
+        );
+      }
       return;
     }
 

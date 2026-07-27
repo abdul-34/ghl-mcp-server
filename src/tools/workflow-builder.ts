@@ -12,7 +12,12 @@
  */
 
 import { ToolDef, defineTool } from './types.js';
-import { WorkflowAction, WorkflowTrigger } from '../crm/workflow-builder-client.js';
+import {
+  WorkflowAction,
+  WorkflowTrigger,
+  WorkflowBuilderClient,
+  MarketplaceModuleSchema,
+} from '../crm/workflow-builder-client.js';
 import {
   getNativeWorkflowModule,
   listNativeWorkflowSections,
@@ -33,7 +38,23 @@ import {
   findMarketplaceModuleByKey,
   slimMarketplaceSearchResults,
 } from '../catalog/marketplace-module-slim.js';
-import { validateWorkflowGraph } from '../catalog/workflow-validator.js';
+import { validateWorkflowGraph, AppModuleSchema } from '../catalog/workflow-validator.js';
+
+/**
+ * Gather the live context the local validator needs: the complete set of valid
+ * module keys (native smartlist + installed apps) and installed-app schemas (for
+ * required-field checks on app-typed actions). Both best-effort — a location
+ * without workflow creds or a flaky marketplace just yields undefined.
+ */
+async function collectValidationContext(
+  wf: WorkflowBuilderClient
+): Promise<{ knownKeys?: Set<string>; appModules?: Map<string, AppModuleSchema> }> {
+  let knownKeys: Set<string> | undefined;
+  let appModules: Map<string, MarketplaceModuleSchema> | undefined;
+  try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
+  try { appModules = await wf.getMarketplaceModuleSchemas(); } catch { /* marketplace optional */ }
+  return { knownKeys, appModules };
+}
 
 const WORKFLOW_ACTION_SCHEMA: Record<string, any> = {
   type: 'object',
@@ -113,7 +134,7 @@ export const workflowBuilderTools: ToolDef[] = [
         items: WORKFLOW_ACTION_SCHEMA,
       },
       publish: { type: 'boolean', description: 'If true, publish the workflow immediately after creation (default: draft)' },
-      force: { type: 'boolean', description: 'Skip local validation (unknown types / missing required fields / broken graph). Use only for freshly-installed marketplace apps not yet in the catalog.' },
+      force: { type: 'boolean', description: 'Override the unknown-module-type rejection only (for freshly-installed apps not yet in the catalog or live list). Required-field and graph checks STILL run and still block — force cannot silently persist a broken workflow.' },
     },
     required: ['name'],
     handler: async (client, args) => {
@@ -127,15 +148,23 @@ export const workflowBuilderTools: ToolDef[] = [
       const requestedTriggers = triggers || (singleTrigger ? [singleTrigger] : []);
 
       // Validate BEFORE creating the draft so we never persist a broken graph or a
-      // dead (unknown-type) trigger. Covers actions AND triggers.
-      if (args.force !== true && ((rawActions && rawActions.length) || requestedTriggers.length)) {
-        let knownKeys: Set<string> | undefined;
-        try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
-        const local = validateWorkflowGraph(rawActions || [], requestedTriggers, { knownKeys });
+      // dead (unknown-type) trigger. Covers actions AND triggers. force only skips
+      // the unknown-type rejection — graph and required-field checks (native catalog
+      // + installed-app schemas) still block, so force can't silently persist a
+      // broken workflow.
+      if ((rawActions && rawActions.length) || requestedTriggers.length) {
+        const { knownKeys, appModules } = await collectValidationContext(wf);
+        const local = validateWorkflowGraph(rawActions || [], requestedTriggers, {
+          knownKeys,
+          appModules,
+          ignoreUnknownTypes: args.force === true,
+        });
         if (!local.valid) {
           throw new Error(
             `Workflow not created — local validation failed:\n- ${local.issues.join('\n- ')}\n` +
-              `Fix these (use crm_get_native_workflow_module / crm_find_workflow_examples), or pass force:true to override.`
+              (args.force === true
+                ? 'These remain even with force:true (force only skips the unknown-type check). Fix the graph / required fields above.'
+                : 'Fix these (crm_get_native_workflow_module / crm_get_workflow_module / crm_find_workflow_examples), or pass force:true to override only the unknown-type check.')
           );
         }
       }
@@ -342,7 +371,7 @@ export const workflowBuilderTools: ToolDef[] = [
 
       const limit = Math.min(Math.max(Number(args.limit ?? 8), 1), 25);
       const maxModules = Math.min(Math.max(Number(args.maxModules ?? 15), 1), 50);
-      const apps = await wf.searchMarketplaceModules({
+      const { modules, fellBack } = await wf.searchMarketplaceModules({
         type,
         query: args.query as string | undefined,
         isInstalled: args.isInstalled as boolean | undefined,
@@ -350,14 +379,34 @@ export const workflowBuilderTools: ToolDef[] = [
         limit,
       });
 
-      const slim = slimMarketplaceSearchResults(apps, type === 'actions' ? 'action' : 'trigger', { maxModules });
+      const slim = slimMarketplaceSearchResults(modules, type === 'actions' ? 'action' : 'trigger', { maxModules });
+
+      // If two+ apps expose a module matching the query, tell the caller how to choose.
+      const ambiguous = slim.results.length > 1 && new Set(slim.results.map((r) => r.appName)).size > 1;
+
+      const notes: string[] = [
+        'These are slim hits only. Call crm_get_workflow_module with moduleKey + type to load one full input schema.',
+      ];
+      if (fellBack) {
+        notes.push(
+          'The installed-only filter returned nothing, so results include the full marketplace catalog — ' +
+            'a connected app may not have registered as "installed" yet; it is still usable.'
+        );
+      }
+      if (ambiguous) {
+        notes.push(
+          'Multiple apps match — compare appName/appId and inputFields/requiredFields (more fields usually = ' +
+            'the fuller official app) to pick the right moduleKey.'
+        );
+      }
       return {
         source: 'live-marketplace-module-search',
         type,
+        installedFilterFellBack: fellBack,
         appCount: slim.appCount,
         moduleCount: slim.moduleCount,
         results: slim.results,
-        note: 'These are slim hits only. Call crm_get_workflow_module with moduleKey + type to load one full input schema.',
+        note: notes.join(' '),
       };
     },
   }),
@@ -385,8 +434,8 @@ export const workflowBuilderTools: ToolDef[] = [
 
       const kind = type === 'actions' ? 'action' : 'trigger';
       const runSearch = async (q: string) => {
-        const apps = await wf.searchMarketplaceModules({ type, query: q, isInstalled: args.isInstalled as boolean | undefined, skip: 0, limit: 15 });
-        return findMarketplaceModuleByKey(apps, key, kind);
+        const { modules } = await wf.searchMarketplaceModules({ type, query: q, isInstalled: args.isInstalled as boolean | undefined, skip: 0, limit: 15 });
+        return findMarketplaceModuleByKey(modules, key, kind);
       };
 
       // Try the explicit query (or the key); if that misses, retry with the key's
@@ -481,6 +530,7 @@ export const workflowBuilderTools: ToolDef[] = [
         description: 'Triggers to validate alongside the actions (optional).',
         items: WORKFLOW_TRIGGER_SCHEMA,
       },
+      force: { type: 'boolean', description: 'Mirror ghl_create_workflow: suppress the unknown-type check so required-field and graph checks are still reachable for freshly-installed apps not yet in the catalog/live list.' },
     },
     handler: async (client, args) => {
       const wf = client.workflowBuilder();
@@ -488,10 +538,15 @@ export const workflowBuilderTools: ToolDef[] = [
       const triggers = (args.triggers as WorkflowTrigger[] | undefined) || [];
 
       // Local checks (unknown types, required fields, graph integrity) that GHL's
-      // own validate-assets does NOT perform. Accept keys from the live module list.
-      let knownKeys: Set<string> | undefined;
-      try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
-      const local = validateWorkflowGraph(actions, triggers, { knownKeys });
+      // own validate-assets does NOT perform. Accept keys from the live module list
+      // and installed-app schemas; force skips only the unknown-type rejection so the
+      // remaining checks are reachable in dry-run (matches ghl_create_workflow).
+      const { knownKeys, appModules } = await collectValidationContext(wf);
+      const local = validateWorkflowGraph(actions, triggers, {
+        knownKeys,
+        appModules,
+        ignoreUnknownTypes: args.force === true,
+      });
 
       // Server preflight (GHL's own rules). Tolerate failures so local issues
       // still surface if the server call errors.
@@ -515,7 +570,8 @@ export const workflowBuilderTools: ToolDef[] = [
         issues,
         note: valid
           ? 'No issues found (local checks + GHL validate-assets) — safe to create/update.'
-          : 'Fix the issues above before creating. For correct attribute values use crm_find_workflow_examples; for the right module key use crm_search_native_workflow_modules.',
+          : 'Fix the issues above before creating. For correct attribute values use crm_find_workflow_examples; ' +
+            'for the right module key use crm_search_native_workflow_modules (core GHL) or crm_search_workflow_modules (installed apps).',
       };
     },
   }),
@@ -601,7 +657,7 @@ export const workflowBuilderTools: ToolDef[] = [
       actions: { type: 'array', description: 'New actions array — replaces all existing actions', items: WORKFLOW_ACTION_SCHEMA },
       triggers: { type: 'array', description: 'New triggers — replaces existing trigger records through dedicated trigger CRUD', items: WORKFLOW_TRIGGER_SCHEMA },
       status: { type: 'string', enum: ['draft', 'published'], description: 'Set workflow status' },
-      force: { type: 'boolean', description: 'Skip local validation (unknown types / missing required fields / broken graph).' },
+      force: { type: 'boolean', description: 'Override the unknown-module-type rejection only (freshly-installed apps). Required-field and graph checks STILL run and still block.' },
     },
     required: ['workflowId'],
     handler: async (client, args) => {
@@ -611,14 +667,19 @@ export const workflowBuilderTools: ToolDef[] = [
 
       const newActions = args.actions as WorkflowAction[] | undefined;
       const newTriggers = args.triggers as WorkflowTrigger[] | undefined;
-      if (args.force !== true && ((newActions && newActions.length) || (newTriggers && newTriggers.length))) {
-        let knownKeys: Set<string> | undefined;
-        try { knownKeys = await wf.getKnownModuleKeys(); } catch { /* live list optional */ }
-        const local = validateWorkflowGraph(newActions || [], newTriggers || [], { knownKeys });
+      if ((newActions && newActions.length) || (newTriggers && newTriggers.length)) {
+        const { knownKeys, appModules } = await collectValidationContext(wf);
+        const local = validateWorkflowGraph(newActions || [], newTriggers || [], {
+          knownKeys,
+          appModules,
+          ignoreUnknownTypes: args.force === true,
+        });
         if (!local.valid) {
           throw new Error(
             `Workflow not updated — local validation failed:\n- ${local.issues.join('\n- ')}\n` +
-              `Fix these, or pass force:true to override.`
+              (args.force === true
+                ? 'These remain even with force:true (force only skips the unknown-type check). Fix the graph / required fields above.'
+                : 'Fix these, or pass force:true to override only the unknown-type check.')
           );
         }
       }

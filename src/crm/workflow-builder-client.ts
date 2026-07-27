@@ -15,6 +15,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { extractMarketplaceModules, toMarketplaceModuleHit } from '../catalog/marketplace-module-slim.js';
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -80,6 +81,22 @@ export interface ModuleListEntry {
   label: string; // display name
 }
 
+/** Result of a marketplace module search, with the install-filter provenance. */
+export interface MarketplaceSearchResult {
+  modules: unknown[];
+  /** Whether the returned set is the installed-only set (false = fell back to the full catalog). */
+  isInstalled: boolean;
+  /** True if an installed-only search returned nothing and we retried unfiltered. */
+  fellBack: boolean;
+}
+
+/** Slim schema facts for a marketplace module, used to validate app-typed actions. */
+export interface MarketplaceModuleSchema {
+  key: string;
+  kind: 'action' | 'trigger';
+  requiredFields: string[];
+}
+
 /** A real action/trigger payload mined from an existing workflow. */
 export interface WorkflowExample {
   kind: 'action' | 'trigger';
@@ -140,6 +157,8 @@ export class WorkflowBuilderClient {
   private exampleIndex: Map<string, WorkflowExample[]> | null = null;
   /** Cached live module list (the complete set of valid action/trigger keys). */
   private moduleListCache: { actions: ModuleListEntry[]; triggers: ModuleListEntry[] } | null = null;
+  /** Cached marketplace (installed-app) module schemas, keyed by module key. */
+  private marketplaceModuleCache: Map<string, MarketplaceModuleSchema> | null = null;
 
   private static readonly API_ORIGIN = 'https://backend.leadconnectorhq.com';
   private static readonly BUILDER_ORIGIN = 'https://client-app-automation-workflows.leadconnectorhq.com';
@@ -762,10 +781,21 @@ export class WorkflowBuilderClient {
     return this.moduleListCache;
   }
 
-  /** The complete set of valid module keys (actions + triggers) for this location. */
+  /**
+   * The complete set of valid module keys (actions + triggers) for this location:
+   * the native smartlist PLUS installed marketplace-app modules. The smartlist alone
+   * omits connected apps (Todoist, ClickUp, …), which made the validator reject them
+   * as "unknown module type"; merging the marketplace index closes that gap.
+   */
   async getKnownModuleKeys(): Promise<Set<string>> {
     const { actions, triggers } = await this.fetchModuleList();
-    return new Set([...actions, ...triggers].map((m) => m.value));
+    const keys = new Set([...actions, ...triggers].map((m) => m.value));
+    try {
+      for (const key of (await this.getMarketplaceModuleSchemas()).keys()) keys.add(key);
+    } catch {
+      /* marketplace index optional */
+    }
+    return keys;
   }
 
   async listWorkflowTriggers(workflowId: string): Promise<WorkflowTrigger[]> {
@@ -826,10 +856,11 @@ export class WorkflowBuilderClient {
     );
   }
 
-  async searchMarketplaceModules(options: {
+  /** One raw call to the marketplace module-search endpoint. */
+  private async runMarketplaceModuleQuery(options: {
     type: 'actions' | 'triggers';
     query?: string;
-    isInstalled?: boolean;
+    isInstalled: boolean;
     skip?: number;
     limit?: number;
   }): Promise<unknown[]> {
@@ -840,13 +871,69 @@ export class WorkflowBuilderClient {
       type: options.type,
       skip: String(Math.max(0, options.skip ?? 0)),
       limit: String(Math.min(25, Math.max(1, options.limit ?? 8))),
-      isInstalled: String(options.isInstalled ?? true),
+      isInstalled: String(options.isInstalled),
       query: options.query?.trim() || 'null',
     });
     const { data } = await this.requestMarketplace<unknown[]>(
       `/marketplace/core/search/module?${query.toString()}`
     );
     return Array.isArray(data) ? data : [];
+  }
+
+  /**
+   * Search the marketplace for app modules. GHL's `isInstalled=true` filter can
+   * miss genuinely-connected apps (a company/location scope-propagation lag), which
+   * previously made every connected-app module look "not found" and forced callers
+   * onto force:true. So when an installed-only search comes back empty we retry
+   * unfiltered — the module data itself resolves fine that way — and report that we
+   * fell back, so connected apps are usable through the normal flow.
+   */
+  async searchMarketplaceModules(options: {
+    type: 'actions' | 'triggers';
+    query?: string;
+    isInstalled?: boolean;
+    skip?: number;
+    limit?: number;
+  }): Promise<MarketplaceSearchResult> {
+    const wantInstalled = options.isInstalled ?? true;
+    let modules = await this.runMarketplaceModuleQuery({ ...options, isInstalled: wantInstalled });
+    if (wantInstalled && modules.length === 0) {
+      const all = await this.runMarketplaceModuleQuery({ ...options, isInstalled: false });
+      if (all.length) return { modules: all, isInstalled: false, fellBack: true };
+    }
+    return { modules, isInstalled: wantInstalled, fellBack: false };
+  }
+
+  /**
+   * The set of installed-app (marketplace) module schemas for this location, keyed
+   * by module key. Broad no-query fetch of actions + triggers (with the install-filter
+   * fallback), cached per session. Best-effort — a failing endpoint yields an empty
+   * map. Used to (a) accept app-typed actions in validation without force, and
+   * (b) run required-field checks against the app's own schema.
+   */
+  async getMarketplaceModuleSchemas(refresh = false): Promise<Map<string, MarketplaceModuleSchema>> {
+    if (this.marketplaceModuleCache && !refresh) return this.marketplaceModuleCache;
+    const index = new Map<string, MarketplaceModuleSchema>();
+    const collect = async (type: 'actions' | 'triggers'): Promise<void> => {
+      try {
+        const { modules } = await this.searchMarketplaceModules({ type, limit: 25 });
+        const kind = type === 'actions' ? 'action' : 'trigger';
+        for (const appRaw of modules) {
+          const app = appRaw && typeof appRaw === 'object' ? (appRaw as Record<string, unknown>) : null;
+          if (!app) continue;
+          for (const mod of extractMarketplaceModules(app, kind)) {
+            const hit = toMarketplaceModuleHit(app, mod, kind);
+            if (!hit) continue;
+            index.set(hit.moduleKey, { key: hit.moduleKey, kind, requiredFields: hit.requiredFields });
+          }
+        }
+      } catch {
+        /* marketplace unavailable — best-effort */
+      }
+    };
+    await Promise.all([collect('actions'), collect('triggers')]);
+    this.marketplaceModuleCache = index;
+    return index;
   }
 
   /**
