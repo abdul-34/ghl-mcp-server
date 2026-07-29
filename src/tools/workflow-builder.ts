@@ -383,8 +383,10 @@ export const workflowBuilderTools: ToolDef[] = [
     name: 'crm_search_workflow_modules',
     description:
       'Search the live CRM marketplace for installed app workflow actions or triggers. ' +
-      'Returns a SLIM list only: app name, module key, required field names, and input/filter names. ' +
-      'Does NOT return full schemas (those exceed tool limits). ' +
+      'Returns a SLIM list only: app name, module key, required field names, input/filter names, and an ' +
+      'installed flag. Does NOT return full schemas (those exceed tool limits). ' +
+      'When a query is given, results also include full-catalog matches (installed:false) so connected apps ' +
+      'surface even when GHL does not report them as installed — this covers both actions and triggers. ' +
       'After picking a moduleKey, call crm_get_workflow_module for that one schema. ' +
       'Native CRM modules are not here — use crm_search_native_workflow_modules.',
     properties: {
@@ -403,18 +405,46 @@ export const workflowBuilderTools: ToolDef[] = [
 
       const limit = Math.min(Math.max(Number(args.limit ?? 8), 1), 25);
       const maxModules = Math.min(Math.max(Number(args.maxModules ?? 15), 1), 50);
+      const kind = type === 'actions' ? 'action' : 'trigger';
+      const query = (args.query as string | undefined)?.trim() || undefined;
+      const wantInstalled = args.isInstalled !== false; // default true
+
       const { modules, fellBack } = await wf.searchMarketplaceModules({
         type,
-        query: args.query as string | undefined,
+        query,
         isInstalled: args.isInstalled as boolean | undefined,
         skip: args.skip as number | undefined,
         limit,
       });
 
-      const slim = slimMarketplaceSearchResults(modules, type === 'actions' ? 'action' : 'trigger', { maxModules });
+      const primary = slimMarketplaceSearchResults(modules, kind, { maxModules });
+      let results = primary.results.map((r) => ({ ...r, installed: wantInstalled && !fellBack }));
+
+      // GHL's installed filter is unreliable — for triggers especially it returns a
+      // non-empty-but-incomplete set, so the empty-fallback never fires and connected
+      // apps (e.g. ClickUp triggers) never surface. When browsing WITH a query under
+      // the installed filter and we did NOT already fall back, also merge the full
+      // marketplace catalog so query-driven discovery reaches every app, actions and
+      // triggers alike. Merged-in hits are marked installed:false (best-effort signal).
+      let mergedFullCatalog = false;
+      if (wantInstalled && !fellBack && query) {
+        try {
+          const full = await wf.searchMarketplaceModules({ type, query, isInstalled: false, skip: args.skip as number | undefined, limit });
+          const have = new Set(results.map((r) => r.moduleKey));
+          const extra = slimMarketplaceSearchResults(full.modules, kind, { maxModules })
+            .results.filter((r) => !have.has(r.moduleKey))
+            .map((r) => ({ ...r, installed: false }));
+          if (extra.length) {
+            results = [...results, ...extra].slice(0, maxModules);
+            mergedFullCatalog = true;
+          }
+        } catch {
+          /* full-catalog merge is best-effort */
+        }
+      }
 
       // If two+ apps expose a module matching the query, tell the caller how to choose.
-      const ambiguous = slim.results.length > 1 && new Set(slim.results.map((r) => r.appName)).size > 1;
+      const ambiguous = results.length > 1 && new Set(results.map((r) => r.appName)).size > 1;
 
       const notes: string[] = [
         'These are slim hits only. Call crm_get_workflow_module with moduleKey + type to load one full input schema.',
@@ -423,6 +453,12 @@ export const workflowBuilderTools: ToolDef[] = [
         notes.push(
           'The installed-only filter returned nothing, so results include the full marketplace catalog — ' +
             'a connected app may not have registered as "installed" yet; it is still usable.'
+        );
+      }
+      if (mergedFullCatalog) {
+        notes.push(
+          'The installed filter returned an incomplete set, so results also include full-catalog matches ' +
+            '(installed:false) — GHL may not report a connected app as "installed"; those modules still build fine.'
         );
       }
       if (ambiguous) {
@@ -435,9 +471,10 @@ export const workflowBuilderTools: ToolDef[] = [
         source: 'live-marketplace-module-search',
         type,
         installedFilterFellBack: fellBack,
-        appCount: slim.appCount,
-        moduleCount: slim.moduleCount,
-        results: slim.results,
+        mergedFullCatalog,
+        appCount: primary.appCount,
+        moduleCount: results.length,
+        results,
         note: notes.join(' '),
       };
     },

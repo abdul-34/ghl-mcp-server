@@ -17,10 +17,13 @@ import {
   ResolvedLocation,
   ResolvedWorkflowCreds,
   AgencyBuilderToken,
+  AuthMode,
   loadLocationsForLink,
   loadAgencyBuilderToken,
   updateWorkflowCreds,
   storeAgencyBuilderToken,
+  storeAgencyFirebaseCreds,
+  getOrRefreshLocationToken,
 } from '../db/supabase-store.js';
 
 export interface AccountSummary {
@@ -40,9 +43,13 @@ export interface PoolOptions {
 interface Account {
   subaccountId: string;
   locationId: string;
+  /** PIT (pit mode) or the initial cached OAuth token (oauth mode; may be ''). */
   accessToken: string;
   name?: string;
   workflow?: ResolvedWorkflowCreds;
+  authMode: AuthMode;
+  /** The full resolved record — its cached OAuth token/expiry is mutated in place on refresh. */
+  resolved: ResolvedLocation;
 }
 
 const DEFAULT_BASE_URL = 'https://services.leadconnectorhq.com';
@@ -71,15 +78,34 @@ export class CRMClientPool {
     }
 
     for (const loc of locations) {
-      if (!loc.locationId || !loc.accessToken) continue;
+      if (!loc.locationId) continue;
+      // PIT rows need a token now; OAuth rows mint one lazily on first use.
+      if (loc.authMode === 'pit' && !loc.accessToken) continue;
       this.accounts.set(loc.locationId, {
         subaccountId: loc.subaccountId,
         locationId: loc.locationId,
         accessToken: loc.accessToken,
         name: loc.name,
         workflow: loc.workflow,
+        authMode: loc.authMode,
+        resolved: loc,
       });
     }
+  }
+
+  /**
+   * A fresh Bearer for a sub-account. PIT → the static token. OAuth → a cached
+   * location token while valid, else minted/refreshed on demand (persisted). The
+   * resolved record holds the cached token in memory, so repeated calls avoid
+   * network until expiry.
+   */
+  private tokenProvider(locationId: string): () => Promise<string> {
+    return async () => {
+      const acct = this.accounts.get(locationId);
+      if (!acct) throw new Error(`Unknown sub-account locationId "${locationId}".`);
+      if (acct.authMode === 'pit') return acct.accessToken;
+      return getOrRefreshLocationToken(acct.resolved);
+    };
   }
 
   static fromLocations(locations: ResolvedLocation[], options: PoolOptions = {}): CRMClientPool {
@@ -113,6 +139,8 @@ export class CRMClientPool {
       locationId: acct.locationId,
       baseUrl: this.baseUrl,
       version: this.version,
+      // OAuth locations refresh per request; PIT locations return the static token.
+      getAccessToken: acct.authMode === 'oauth' ? this.tokenProvider(locationId) : undefined,
       getWorkflowBuilder: () => this.getWorkflowClient(locationId),
     });
     this.clients.set(locationId, client);
@@ -135,17 +163,29 @@ export class CRMClientPool {
     }
 
     const wf = acct.workflow;
+    const agency = this.agencyBuilder;
     // The builder JWT is agency-wide and kept fresh by the extension's continuous
     // push; prefer it over any stale per-sub-account copy.
-    const authToken = this.agencyBuilder?.authToken || wf?.authToken;
-    const refreshToken = this.agencyBuilder?.refreshToken || wf?.refreshToken;
+    const authToken = agency?.authToken || wf?.authToken;
+    const refreshToken = agency?.refreshToken || wf?.refreshToken;
 
-    const hasFirebase = Boolean(wf?.firebaseApiKey && wf?.firebaseRefreshToken);
+    // Firebase creds are the logged-in user's session — identical for every
+    // sub-account — so they're captured once and shared at the agency level. Prefer
+    // a per-sub-account override when present (e.g. a different login), else fall
+    // back to the agency-wide creds. The rotation persists to whichever source we used.
+    const hasSubFirebase = Boolean(wf?.firebaseApiKey && wf?.firebaseRefreshToken);
+    const firebaseSource: 'subaccount' | 'agency' = hasSubFirebase ? 'subaccount' : 'agency';
+    const firebaseApiKey = hasSubFirebase ? wf!.firebaseApiKey! : agency?.firebaseApiKey || '';
+    const firebaseRefreshToken = hasSubFirebase ? wf!.firebaseRefreshToken! : agency?.firebaseRefreshToken || '';
+    const companyId = wf?.companyId || agency?.companyId;
+    const userId = wf?.userId || agency?.userId;
+
+    const hasFirebase = Boolean(firebaseApiKey && firebaseRefreshToken);
     const hasBuilder = Boolean(authToken || refreshToken);
     if (!hasFirebase && !hasBuilder) {
       throw new Error(
-        `No workflow credentials captured for sub-account "${locationId}". Run the capture ` +
-          `extension against this location (Firebase creds for workflow CRUD, plus the agency ` +
+        `No workflow credentials captured for this agency. Run the capture extension ONCE on any ` +
+          `logged-in CRM tab — the Firebase session is shared across all sub-accounts (plus the agency ` +
           `builder token for marketplace module discovery).`
       );
     }
@@ -154,25 +194,38 @@ export class CRMClientPool {
     const ownerId = this.ownerId;
 
     const client = new WorkflowBuilderClient({
-      apiKey: acct.accessToken, // PIT — reused as the internal-API Bearer token.
-      firebaseApiKey: wf?.firebaseApiKey || '',
-      firebaseRefreshToken: wf?.firebaseRefreshToken || '',
+      // PIT accounts reuse the PIT as the internal-API Bearer. OAuth location tokens
+      // do NOT work on the internal /workflow API, so OAuth accounts pass no static
+      // Bearer — the workflow client falls back to the Firebase id token (which is
+      // what the /workflow API actually authenticates). Workflow tools therefore
+      // still require the Firebase capture for OAuth sub-accounts, exactly as for PIT.
+      apiKey: acct.authMode === 'pit' ? acct.accessToken : '',
+      firebaseApiKey,
+      firebaseRefreshToken,
       authToken,
       refreshToken,
       locationId: acct.locationId,
-      userId: wf?.userId,
-      companyId: wf?.companyId,
+      userId,
+      companyId,
       companyAge: wf?.companyAge,
-      // Route rotated tokens: Firebase → the sub-account row; builder JWT → the
-      // agency row (shared across all the owner's sub-accounts).
+      // Route rotated tokens to their source: Firebase → the agency row when the
+      // creds came from there (default), or the sub-account row on a per-sub override;
+      // builder JWT → always the agency row.
       persist: async (patch) => {
-        // Firebase refresh + resolved context ids → the sub-account row.
         if (patch.firebaseRefreshToken || patch.companyId || patch.userId) {
-          await updateWorkflowCreds(subaccountId, {
-            firebaseRefreshToken: patch.firebaseRefreshToken,
-            companyId: patch.companyId,
-            userId: patch.userId,
-          });
+          if (firebaseSource === 'agency' && ownerId) {
+            await storeAgencyFirebaseCreds(ownerId, {
+              firebaseRefreshToken: patch.firebaseRefreshToken,
+              companyId: patch.companyId,
+              userId: patch.userId,
+            });
+          } else {
+            await updateWorkflowCreds(subaccountId, {
+              firebaseRefreshToken: patch.firebaseRefreshToken,
+              companyId: patch.companyId,
+              userId: patch.userId,
+            });
+          }
         }
         // Builder JWT is agency-wide → the agency row.
         if ((patch.authToken || patch.refreshToken) && ownerId) {

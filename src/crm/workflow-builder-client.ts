@@ -121,7 +121,13 @@ export interface WorkflowCredsPatch {
 }
 
 export interface WorkflowBuilderConfig {
-  /** Bearer token for the internal API = the sub-account's Private Integration Token. */
+  /**
+   * Bearer token for the internal API = the sub-account's Private Integration
+   * Token. Empty for OAuth sub-accounts (OAuth location tokens do NOT work on the
+   * internal /workflow API), in which case the Firebase id token is used as the
+   * Bearer instead — so a workflow client for an OAuth account still requires
+   * captured Firebase credentials.
+   */
   apiKey: string;
   firebaseApiKey: string;
   firebaseRefreshToken: string;
@@ -208,7 +214,10 @@ export class WorkflowBuilderClient {
         await this.refreshFirebaseToken();
       }
       return {
-        'Authorization': `Bearer ${this.config.apiKey}`,
+        // PIT accounts: Bearer = PIT. OAuth accounts have no PIT — the /workflow API
+        // does not accept an OAuth location token, so the Firebase id token is the
+        // Bearer (it is what actually authenticates the internal workflow API).
+        'Authorization': `Bearer ${this.config.apiKey || this.cachedIdToken}`,
         'token-id': this.cachedIdToken!,
         'channel': 'APP',
         'source': 'WEB_USER',

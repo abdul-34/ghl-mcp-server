@@ -17,6 +17,9 @@ services:
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      # OAuth: needed to refresh agency tokens and mint location tokens at request time.
+      GHL_OAUTH_CLIENT_ID: ${GHL_OAUTH_CLIENT_ID}
+      GHL_OAUTH_CLIENT_SECRET: ${GHL_OAUTH_CLIENT_SECRET}
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -30,13 +33,31 @@ services:
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
         NEXT_PUBLIC_MCP_BASE_URL: ${NEXT_PUBLIC_MCP_BASE_URL}
     environment:
-      # Server-side only — used to encrypt PITs. MUST match the MCP server.
+      # Server-side only — used to encrypt PITs/tokens. MUST match the MCP server.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       NEXT_PUBLIC_MCP_BASE_URL: ${NEXT_PUBLIC_MCP_BASE_URL}
+      # Service role — the OAuth callback writes installs with it (owner from signed state).
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # GHL Marketplace app (OAuth acquisition).
+      GHL_OAUTH_CLIENT_ID: ${GHL_OAUTH_CLIENT_ID}
+      GHL_OAUTH_CLIENT_SECRET: ${GHL_OAUTH_CLIENT_SECRET}
+      GHL_OAUTH_REDIRECT_URI: ${GHL_OAUTH_REDIRECT_URI}
+      GHL_OAUTH_SCOPES: ${GHL_OAUTH_SCOPES}
+      GHL_APP_ID: ${GHL_APP_ID}
+      OAUTH_STATE_SECRET: ${OAUTH_STATE_SECRET}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+      # White-label domains via Cloudflare for SaaS (Custom Hostnames).
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      CLOUDFLARE_ZONE_ID: ${CLOUDFLARE_ZONE_ID}
+      CF_SAAS_CNAME_TARGET: ${CF_SAAS_CNAME_TARGET}
     ports:
       - "3000:3000"
     depends_on:
       - mcp-server
     restart: unless-stopped
+
+# White-label TLS is handled by Cloudflare for SaaS (no local reverse proxy /
+# ACME needed). Point your Cloudflare SaaS fallback origin at this app's public
+# origin hostname; agencies CNAME their domain to CF_SAAS_CNAME_TARGET.

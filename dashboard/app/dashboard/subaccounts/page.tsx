@@ -1,24 +1,32 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { AddSubaccountForm } from '@/components/AddSubaccountForm';
+import { OauthInstallPanel } from '@/components/OauthInstallPanel';
 import { deleteSubaccount } from './actions';
+import { getInstallStatus } from './oauth-actions';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SubaccountsPage() {
   const supabase = await createSupabaseServerClient();
-  const { data: subaccounts } = await supabase
-    .from('subaccounts')
-    .select('id, name, location_id, created_at, base_refresh_token, workflow_creds_updated_at')
-    .order('created_at', { ascending: false });
+  const [{ data: subaccounts }, installStatus] = await Promise.all([
+    supabase
+      .from('subaccounts')
+      .select('id, name, location_id, created_at, base_refresh_token, workflow_creds_updated_at, auth_mode')
+      .order('created_at', { ascending: false }),
+    getInstallStatus(),
+  ]);
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Sub-accounts</h1>
         <p className="mt-1 text-sm text-slate-500">
-          One row per CRM sub-account, each with its own Private Integration Token.
+          One row per CRM sub-account. Connect via the GoHighLevel Marketplace app (auto-refreshing
+          tokens) or add one manually with its Private Integration Token.
         </p>
       </div>
+
+      <OauthInstallPanel status={installStatus} />
 
       <AddSubaccountForm />
 
@@ -33,6 +41,15 @@ export default async function SubaccountsPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{s.name || '(unnamed)'}</span>
+                    <span
+                      className={`rounded px-2 py-0.5 text-xs ${
+                        s.auth_mode === 'oauth'
+                          ? 'bg-indigo-100 text-indigo-700'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {s.auth_mode === 'oauth' ? 'OAuth' : 'PIT'}
+                    </span>
                     {s.base_refresh_token ? (
                       <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">
                         workflow ready

@@ -17,10 +17,11 @@ export default async function CapturePage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Workflow capture</h1>
         <p className="mt-1 text-sm text-slate-500">
-          The workflow-builder tools use GoHighLevel&apos;s internal API, which needs each
-          sub-account&apos;s Firebase credentials. Install the CRM Token Bridge extension, paste a
-          capture token below, then capture from each sub-account&apos;s CRM tab. Credentials are
-          stored encrypted and refreshed automatically. Add the sub-account (with its PIT) first.
+          The workflow-builder tools use GoHighLevel&apos;s internal API, which needs your Firebase
+          session credentials. Install the CRM Token Bridge extension, paste a capture token below,
+          then capture <strong>once</strong> from any logged-in CRM tab — the Firebase session is the
+          same across all your sub-accounts, so a single capture covers them all. Credentials are
+          stored encrypted at the agency level and refreshed automatically.
         </p>
       </div>
 

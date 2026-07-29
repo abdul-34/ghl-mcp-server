@@ -19,6 +19,26 @@ function mcpBaseUrl(): string {
   );
 }
 
+/**
+ * The MCP base URL for an owner: their active white-label domain if they have one,
+ * otherwise the shared default. Same path token — only the host changes.
+ */
+async function resolveOwnerMcpBase(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  ownerId: string
+): Promise<string> {
+  const { data } = await supabase
+    .from('custom_domains')
+    .select('domain')
+    .eq('owner_id', ownerId)
+    .eq('status', 'active')
+    .order('verified_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const domain = data?.domain as string | undefined;
+  return domain ? `https://${domain}` : mcpBaseUrl();
+}
+
 export async function createLink(
   _prev: CreateLinkResult,
   formData: FormData
@@ -59,8 +79,9 @@ export async function createLink(
 
   if (error) return { ok: false, error: error.message };
 
+  const base = await resolveOwnerMcpBase(supabase, user.id);
   revalidatePath('/dashboard/links');
-  return { ok: true, secret, url: `${mcpBaseUrl()}/mcp/${secret}` };
+  return { ok: true, secret, url: `${base}/mcp/${secret}` };
 }
 
 export async function revokeLink(formData: FormData): Promise<void> {

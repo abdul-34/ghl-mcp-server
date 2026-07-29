@@ -29,6 +29,7 @@ import {
   resolveCaptureToken,
   storeCapturedWorkflowCreds,
   storeAgencyBuilderToken,
+  storeAgencyFirebaseCreds,
   touchCaptureTokenUsed,
 } from './db/supabase-store.js';
 import { listTools, callTool, toolCount } from './tools/index.js';
@@ -196,37 +197,55 @@ class CRMMcpHttpServer {
     const companyId = typeof body.companyId === 'string' ? body.companyId : undefined;
     const userId = typeof body.userId === 'string' ? body.userId : undefined;
 
-    if (!locationId) {
-      res.status(400).json({ ok: false, error: 'locationId is required (open a CRM sub-account tab before capturing).' });
-      return;
-    }
     if (!firebaseRefreshToken && !authToken) {
       res.status(400).json({ ok: false, error: 'No Firebase refresh token or builder token found to store.' });
       return;
     }
 
     try {
-      const result = await storeCapturedWorkflowCreds(owner.ownerId, {
-        locationId,
-        firebaseApiKey,
-        firebaseRefreshToken,
-        authToken,
-        companyId,
-        userId,
-      });
-      if (!result.ok) {
-        res.status(409).json({ ok: false, error: result.error });
-        return;
+      // Firebase creds are the logged-in user's session — identical across every
+      // sub-account — so we store them ONCE at the agency level. No need to open
+      // each sub-account: one capture on any logged-in CRM tab covers them all.
+      let storedFirebase = false;
+      if (firebaseRefreshToken || firebaseApiKey || companyId || userId) {
+        const r = await storeAgencyFirebaseCreds(owner.ownerId, { firebaseApiKey, firebaseRefreshToken, companyId, userId });
+        if (!r.ok) {
+          res.status(500).json({ ok: false, error: r.error || 'Failed to store agency Firebase creds.' });
+          return;
+        }
+        storedFirebase = Boolean(firebaseRefreshToken);
       }
+
+      // Builder JWT is agency-wide too.
+      if (authToken) {
+        await storeAgencyBuilderToken(owner.ownerId, { authToken });
+      }
+
+      // Optional per-sub-account override: only when a locationId is supplied and it
+      // matches an existing sub-account. Best-effort — never fails the capture.
+      let storedPerSubaccount = false;
+      if (locationId && (firebaseRefreshToken || authToken)) {
+        const r = await storeCapturedWorkflowCreds(owner.ownerId, {
+          locationId,
+          firebaseApiKey,
+          firebaseRefreshToken,
+          authToken,
+          companyId,
+          userId,
+        });
+        storedPerSubaccount = r.ok;
+      }
+
       void touchCaptureTokenUsed(owner.tokenId);
       res.json({
         ok: true,
         summary: {
-          locationId,
-          storedFirebase: Boolean(firebaseRefreshToken),
+          scope: 'agency',
+          storedFirebase,
           storedBuilderToken: Boolean(authToken),
           storedCompanyId: Boolean(companyId),
           storedUserId: Boolean(userId),
+          storedPerSubaccountOverride: storedPerSubaccount,
         },
       });
     } catch (err) {

@@ -76,6 +76,8 @@ class CRMMcpServer {
             locationId,
             accessToken: pitToken,
             name: process.env.CRM_LOCATION_NAME?.trim() || undefined,
+            authMode: 'pit',
+            ownerId: 'stdio', // no agency owner in direct stdio mode
           },
         ]);
         this.gateway = gatewayEnv;

@@ -11,12 +11,24 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { WorkflowBuilderClient } from './workflow-builder-client.js';
 
 export interface CRMClientConfig {
-  /** Bearer token (Private Integration Token) for this sub-account. */
+  /**
+   * Bearer token for this sub-account. For PIT auth this is the static, long-lived
+   * Private Integration Token. When `getAccessToken` is provided (OAuth), this may
+   * be an initial/empty value — the provider supplies a fresh token per request.
+   */
   accessToken: string;
   /** Sub-account (location) id this client acts on. */
   locationId: string;
   baseUrl?: string;
   version?: string;
+  /**
+   * Optional per-request Bearer provider. When present, the Authorization header
+   * is set on EVERY request from this callback instead of being baked in at
+   * construction — this is what lets a short-lived OAuth token refresh mid-session
+   * without dropping the MCP connection. When absent, behavior is the original
+   * static-header path (PIT / stdio), fully backward-compatible.
+   */
+  getAccessToken?: () => Promise<string>;
   /**
    * Lazily resolve the sibling internal-API workflow client for this
    * sub-account. Injected by the pool; absent for direct/stdio clients. Throws
@@ -43,21 +55,37 @@ export class CRMClient {
   private readonly getWorkflowBuilder?: () => WorkflowBuilderClient;
 
   constructor(config: CRMClientConfig) {
-    if (!config.accessToken) throw new Error('CRMClient: accessToken is required.');
+    if (!config.accessToken && !config.getAccessToken) {
+      throw new Error('CRMClient: accessToken or getAccessToken is required.');
+    }
     if (!config.locationId) throw new Error('CRMClient: locationId is required.');
 
     this.locationId = config.locationId;
     this.getWorkflowBuilder = config.getWorkflowBuilder;
+
+    const headers: Record<string, string> = {
+      Version: config.version || DEFAULT_VERSION,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    };
+    // Static-token path (PIT/stdio): bake the Bearer once. Provider path (OAuth):
+    // leave it off and set it per request via the interceptor below.
+    if (!config.getAccessToken) headers.Authorization = `Bearer ${config.accessToken}`;
+
     this.http = axios.create({
       baseURL: config.baseUrl || DEFAULT_BASE_URL,
       timeout: 30_000,
-      headers: {
-        Authorization: `Bearer ${config.accessToken}`,
-        Version: config.version || DEFAULT_VERSION,
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
+      headers,
     });
+
+    if (config.getAccessToken) {
+      const provider = config.getAccessToken;
+      this.http.interceptors.request.use(async (cfg) => {
+        const token = await provider();
+        cfg.headers.set('Authorization', `Bearer ${token}`);
+        return cfg;
+      });
+    }
   }
 
   async request<T = unknown>(method: HttpMethod, path: string, opts: RequestOptions = {}): Promise<T> {

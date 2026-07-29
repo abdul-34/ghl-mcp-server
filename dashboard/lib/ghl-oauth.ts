@@ -1,0 +1,168 @@
+/**
+ * GHL Marketplace OAuth — dashboard-side acquisition helpers.
+ *
+ * The dashboard runs the interactive install (build authorize URL → exchange the
+ * returned code), lists the agency's installed sub-accounts, and can refresh /
+ * mint tokens. The MCP server mirrors the refresh/mint calls (src/crm/ghl-oauth.ts)
+ * for request-time upkeep.
+ *
+ * GHL's token endpoint uses the v3 convention: `Version: v3` header, camelCase
+ * form params (clientId/clientSecret/grantType/refreshToken/redirectUri) and
+ * camelCase JSON (accessToken/refreshToken/expiresIn). We send BOTH camel and
+ * snake keys and read BOTH response conventions for robustness. Never logged.
+ */
+
+const CHOOSE_LOCATION_URL = 'https://marketplace.leadconnectorhq.com/oauth/chooselocation';
+const OAUTH_TOKEN_URL = 'https://services.leadconnectorhq.com/oauth/token';
+const LOCATION_TOKEN_URL = 'https://services.leadconnectorhq.com/oauth/locationToken';
+const INSTALLED_LOCATIONS_URL = 'https://services.leadconnectorhq.com/oauth/installedLocations';
+
+export interface OAuthTokens {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn: number;
+  scope?: string;
+  userType?: string;
+  companyId?: string;
+  locationId?: string;
+}
+
+export interface InstalledLocation {
+  locationId: string;
+  name?: string;
+}
+
+function creds(): { clientId: string; clientSecret: string; redirectUri: string; scopes: string; appId?: string } {
+  const clientId = process.env.GHL_OAUTH_CLIENT_ID?.trim();
+  const clientSecret = process.env.GHL_OAUTH_CLIENT_SECRET?.trim();
+  const redirectUri = process.env.GHL_OAUTH_REDIRECT_URI?.trim();
+  const scopes = process.env.GHL_OAUTH_SCOPES?.trim() || '';
+  const appId = process.env.GHL_APP_ID?.trim();
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error('GHL_OAUTH_CLIENT_ID, GHL_OAUTH_CLIENT_SECRET and GHL_OAUTH_REDIRECT_URI are required.');
+  }
+  return { clientId, clientSecret, redirectUri, scopes, appId };
+}
+
+/** The GHL "choose location" authorize URL the agency admin is redirected to. */
+export function buildChooseLocationUrl(state: string): string {
+  const { clientId, redirectUri, scopes } = creds();
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope: scopes,
+    state,
+  });
+  return `${CHOOSE_LOCATION_URL}?${params.toString()}`;
+}
+
+const PARAM_ALIASES: Record<string, string> = {
+  clientId: 'client_id',
+  clientSecret: 'client_secret',
+  grantType: 'grant_type',
+  refreshToken: 'refresh_token',
+  redirectUri: 'redirect_uri',
+  userType: 'user_type',
+};
+
+/** Build form params with both camelCase and snake_case keys for each logical field. */
+function tokenParams(fields: Record<string, string | undefined>): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [camel, value] of Object.entries(fields)) {
+    if (value == null || value === '') continue;
+    params.set(camel, value);
+    const snake = PARAM_ALIASES[camel];
+    if (snake && snake !== camel) params.set(snake, value);
+  }
+  return params;
+}
+
+function pick(data: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const k of keys) if (data[k] != null) return data[k];
+  return undefined;
+}
+
+function normalize(data: Record<string, unknown>): OAuthTokens {
+  const accessToken = String(pick(data, 'accessToken', 'access_token') ?? '');
+  if (!accessToken) throw new Error('GHL OAuth response contained no access token.');
+  const expiresRaw = pick(data, 'expiresIn', 'expires_in');
+  const asStr = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  return {
+    accessToken,
+    refreshToken: asStr(pick(data, 'refreshToken', 'refresh_token')),
+    expiresIn: typeof expiresRaw === 'number' ? expiresRaw : Number(expiresRaw) || 86400,
+    scope: asStr(pick(data, 'scope')),
+    userType: asStr(pick(data, 'userType', 'user_type')),
+    companyId: asStr(pick(data, 'companyId', 'company_id')),
+    locationId: asStr(pick(data, 'locationId', 'location_id')),
+  };
+}
+
+async function oauthError(res: Response, op: string): Promise<Error> {
+  let detail = '';
+  try {
+    const body = (await res.json()) as Record<string, unknown>;
+    detail = String(body.error || body.message || body.error_description || '').slice(0, 200);
+  } catch {
+    /* non-JSON */
+  }
+  return new Error(`GHL OAuth ${op} failed (${res.status})${detail ? `: ${detail}` : ''}`);
+}
+
+async function postToken(body: URLSearchParams, bearer?: string): Promise<Response> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Accept: 'application/json',
+    Version: 'v3',
+  };
+  if (bearer) headers.Authorization = `Bearer ${bearer}`;
+  return fetch(bearer ? LOCATION_TOKEN_URL : OAUTH_TOKEN_URL, { method: 'POST', headers, body });
+}
+
+/** Exchange an authorization code for tokens (install step). */
+export async function exchangeCode(code: string): Promise<OAuthTokens> {
+  const { clientId, clientSecret, redirectUri } = creds();
+  const body = tokenParams({ clientId, clientSecret, grantType: 'authorization_code', code, redirectUri });
+  const res = await postToken(body);
+  if (!res.ok) throw await oauthError(res, 'code exchange');
+  return normalize((await res.json()) as Record<string, unknown>);
+}
+
+/** Refresh a Company (agency) token; the refresh token rotates — persist both. */
+export async function refreshCompanyToken(refreshToken: string): Promise<OAuthTokens> {
+  const { clientId, clientSecret } = creds();
+  const body = tokenParams({ clientId, clientSecret, grantType: 'refresh_token', refreshToken, userType: 'Company' });
+  const res = await postToken(body);
+  if (!res.ok) throw await oauthError(res, 'company refresh');
+  return normalize((await res.json()) as Record<string, unknown>);
+}
+
+/** Mint a Location token from a live Company token (may also return a location refresh token on v3). */
+export async function mintLocationToken(companyAccessToken: string, companyId: string, locationId: string): Promise<OAuthTokens> {
+  const res = await postToken(tokenParams({ companyId, locationId }), companyAccessToken);
+  if (!res.ok) throw await oauthError(res, 'locationToken');
+  return normalize((await res.json()) as Record<string, unknown>);
+}
+
+/** List the sub-accounts where the agency has installed the app. */
+export async function listInstalledLocations(companyAccessToken: string, companyId: string): Promise<InstalledLocation[]> {
+  const { appId } = creds();
+  const params = new URLSearchParams({ companyId });
+  if (appId) params.set('appId', appId);
+  const res = await fetch(`${INSTALLED_LOCATIONS_URL}?${params.toString()}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${companyAccessToken}`, Accept: 'application/json', Version: 'v3' },
+  });
+  if (!res.ok) throw await oauthError(res, 'installedLocations');
+  const data = (await res.json()) as Record<string, unknown>;
+  const list = Array.isArray(data.locations) ? data.locations : Array.isArray(data) ? (data as unknown[]) : [];
+  return list
+    .map((item) => {
+      const rec = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+      const locationId = String(rec._id ?? rec.id ?? rec.locationId ?? '');
+      if (!locationId) return null;
+      return { locationId, name: typeof rec.name === 'string' ? rec.name : undefined } as InstalledLocation;
+    })
+    .filter((x): x is InstalledLocation => x !== null);
+}
