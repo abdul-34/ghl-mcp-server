@@ -47,7 +47,7 @@ captureBtn.addEventListener('click', () => {
     const r = response.result;
     setMessage(
       `Captured Firebase credentials` +
-        (r.locationId ? ` for location ${r.locationId}` : '') +
+        (r.locationId ? ` for location ${r.locationId}` : ` for your agency (all sub-accounts)`) +
         `. Stored on the server.`
     );
     refreshStatus();

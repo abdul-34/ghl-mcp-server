@@ -254,11 +254,9 @@ async function captureActiveTab() {
   if (!firebaseResult.credentials?.length) {
     throw new Error('No Firebase credentials found. Sign in to the CRM and retry.');
   }
-  if (!firebaseResult.context?.locationId) {
-    throw new Error(
-      'Could not determine the sub-account (locationId) from this tab. Open a specific location in the CRM, then retry.'
-    );
-  }
+  // No locationId needed: the Firebase session is the logged-in USER's and is
+  // identical across every sub-account, so the server stores it once at the agency
+  // level. Capture from any logged-in CRM tab (the agency dashboard is fine).
 
   // Prefer the newest / first credential set.
   const cred = firebaseResult.credentials[0];
