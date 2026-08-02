@@ -24,6 +24,7 @@ import {
   storeAgencyBuilderToken,
   storeAgencyFirebaseCreds,
   getOrRefreshLocationToken,
+  loadAgencyCompanyId,
 } from '../db/supabase-store.js';
 
 export interface AccountSummary {
@@ -38,6 +39,8 @@ export interface PoolOptions {
   ownerId?: string;
   /** Agency-wide builder JWT shared by all the owner's sub-accounts. */
   agencyBuilder?: AgencyBuilderToken;
+  /** Agency GHL company id from the OAuth install — reliable companyId source for OAuth subs. */
+  agencyCompanyId?: string;
 }
 
 interface Account {
@@ -63,12 +66,14 @@ export class CRMClientPool {
   private readonly version: string;
   private readonly ownerId?: string;
   private readonly agencyBuilder?: AgencyBuilderToken;
+  private readonly agencyCompanyId?: string;
 
   constructor(locations: ResolvedLocation[], options: PoolOptions = {}) {
     this.baseUrl = options.baseUrl || DEFAULT_BASE_URL;
     this.version = options.version || DEFAULT_VERSION;
     this.ownerId = options.ownerId;
     this.agencyBuilder = options.agencyBuilder;
+    this.agencyCompanyId = options.agencyCompanyId;
 
     if (locations.length === 0) {
       throw new Error(
@@ -113,11 +118,12 @@ export class CRMClientPool {
   }
 
   static async fromLink(link: ResolvedLink, options: PoolOptions = {}): Promise<CRMClientPool> {
-    const [locations, agencyBuilder] = await Promise.all([
+    const [locations, agencyBuilder, agencyCompanyId] = await Promise.all([
       loadLocationsForLink(link),
       loadAgencyBuilderToken(link.ownerId),
+      loadAgencyCompanyId(link.ownerId),
     ]);
-    return new CRMClientPool(locations, { ...options, ownerId: link.ownerId, agencyBuilder });
+    return new CRMClientPool(locations, { ...options, ownerId: link.ownerId, agencyBuilder, agencyCompanyId });
   }
 
   get(locationId: string): CRMClient {
@@ -177,10 +183,12 @@ export class CRMClientPool {
     const firebaseSource: 'subaccount' | 'agency' = hasSubFirebase ? 'subaccount' : 'agency';
     const firebaseApiKey = hasSubFirebase ? wf!.firebaseApiKey! : agency?.firebaseApiKey || '';
     const firebaseRefreshToken = hasSubFirebase ? wf!.firebaseRefreshToken! : agency?.firebaseRefreshToken || '';
-    // companyId sources, in order: per-sub workflow creds → the OAuth install's saved
-    // company id on the sub-account row (acct.resolved.ghlCompanyId — set at install,
-    // and the reliable source for OAuth subs whose `wf` block is empty) → agency creds.
-    const companyId = wf?.companyId || acct.resolved.ghlCompanyId || agency?.companyId;
+    // companyId sources, in order: per-sub workflow creds → the sub-account row's saved
+    // id (acct.resolved.ghlCompanyId) → the agency Firebase capture → the agency OAuth
+    // install (this.agencyCompanyId — ALWAYS written at the OAuth callback, so it's the
+    // reliable backstop for OAuth subs even if the row/capture never got a company id).
+    const companyId =
+      wf?.companyId || acct.resolved.ghlCompanyId || agency?.companyId || this.agencyCompanyId;
     const userId = wf?.userId || agency?.userId;
 
     const hasFirebase = Boolean(firebaseApiKey && firebaseRefreshToken);

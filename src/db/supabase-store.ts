@@ -350,6 +350,21 @@ export interface AgencyOAuthInstall {
   expiresAt: number;
 }
 
+/**
+ * The agency's GHL company id from its OAuth install — written at the OAuth
+ * callback and therefore the most reliable company-id source for OAuth
+ * sub-accounts (independent of token decryption or the Firebase capture).
+ */
+export async function loadAgencyCompanyId(ownerId: string): Promise<string | undefined> {
+  const { data, error } = await getSupabase()
+    .from('agency_oauth_installs')
+    .select('ghl_company_id')
+    .eq('owner_id', ownerId)
+    .maybeSingle();
+  if (error || !data) return undefined;
+  return (data.ghl_company_id as string | null) ?? undefined;
+}
+
 /** Load and decrypt the agency-level Company OAuth install for an owner. */
 export async function loadAgencyOAuthInstall(ownerId: string): Promise<AgencyOAuthInstall | undefined> {
   const { data, error } = await getSupabase()
