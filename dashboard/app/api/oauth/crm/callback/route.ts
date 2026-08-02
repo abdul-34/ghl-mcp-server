@@ -13,32 +13,30 @@ import { verifyState, OAUTH_NONCE_COOKIE } from '@/lib/oauth-state';
  *   userType 'Location' → store a PIT-less oauth sub-account directly.
  */
 export async function GET(req: NextRequest) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  // Keep redirects on the current host even if NEXT_PUBLIC_APP_URL is unset.
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || req.nextUrl.origin;
   const fail = (msg: string) =>
     NextResponse.redirect(new URL(`/dashboard/subaccounts?oauth_error=${encodeURIComponent(msg)}`, appUrl));
 
-  const code = req.nextUrl.searchParams.get('code');
-  const state = req.nextUrl.searchParams.get('state');
-  if (!code || !state) return fail('Missing code or state.');
-
-  const parsed = verifyState(state);
-  if (!parsed) return fail('Invalid state signature.');
-
-  const cookieNonce = req.cookies.get(OAUTH_NONCE_COOKIE)?.value;
-  if (!cookieNonce || cookieNonce !== parsed.nonce) return fail('State/nonce mismatch.');
-
-  let tokens;
+  // Everything runs inside try/catch so a misconfiguration (e.g. a missing env
+  // var) surfaces as a readable ?oauth_error= message instead of an opaque 500.
   try {
-    tokens = await exchangeCode(code);
-  } catch (err) {
-    return fail(err instanceof Error ? err.message : 'Token exchange failed.');
-  }
+    const code = req.nextUrl.searchParams.get('code');
+    const state = req.nextUrl.searchParams.get('state');
+    if (!code || !state) return fail('Missing code or state.');
 
-  const supabase = createSupabaseAdminClient();
-  const ownerId = parsed.ownerId;
-  const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
+    const parsed = verifyState(state);
+    if (!parsed) return fail('Invalid state signature.');
 
-  try {
+    const cookieNonce = req.cookies.get(OAUTH_NONCE_COOKIE)?.value;
+    if (!cookieNonce || cookieNonce !== parsed.nonce) return fail('State/nonce mismatch.');
+
+    const tokens = await exchangeCode(code);
+
+    const supabase = createSupabaseAdminClient();
+    const ownerId = parsed.ownerId;
+    const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
+
     if (tokens.userType === 'Location' && tokens.locationId) {
       // Direct sub-account install: store a PIT-less oauth subaccount row.
       if (!tokens.refreshToken) return fail('Location install returned no refresh token.');
@@ -55,7 +53,7 @@ export async function GET(req: NextRequest) {
         },
         { onConflict: 'owner_id,location_id' }
       );
-      if (error) return fail(error.message);
+      if (error) return fail(`DB (subaccounts): ${error.message}`);
     } else {
       // Agency (Company) install: store the durable agency token.
       if (!tokens.companyId || !tokens.refreshToken) return fail('Agency install missing companyId or refresh token.');
@@ -73,13 +71,13 @@ export async function GET(req: NextRequest) {
         },
         { onConflict: 'owner_id' }
       );
-      if (error) return fail(error.message);
+      if (error) return fail(`DB (agency_oauth_installs): ${error.message}`);
     }
-  } catch (err) {
-    return fail(err instanceof Error ? err.message : 'Failed to store OAuth install.');
-  }
 
-  const res = NextResponse.redirect(new URL('/dashboard/subaccounts?connected=1', appUrl));
-  res.cookies.delete(OAUTH_NONCE_COOKIE);
-  return res;
+    const res = NextResponse.redirect(new URL('/dashboard/subaccounts?connected=1', appUrl));
+    res.cookies.delete(OAUTH_NONCE_COOKIE);
+    return res;
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : 'OAuth callback failed.');
+  }
 }
