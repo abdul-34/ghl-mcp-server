@@ -177,7 +177,10 @@ export class CRMClientPool {
     const firebaseSource: 'subaccount' | 'agency' = hasSubFirebase ? 'subaccount' : 'agency';
     const firebaseApiKey = hasSubFirebase ? wf!.firebaseApiKey! : agency?.firebaseApiKey || '';
     const firebaseRefreshToken = hasSubFirebase ? wf!.firebaseRefreshToken! : agency?.firebaseRefreshToken || '';
-    const companyId = wf?.companyId || agency?.companyId;
+    // companyId sources, in order: per-sub workflow creds → the OAuth install's saved
+    // company id on the sub-account row (acct.resolved.ghlCompanyId — set at install,
+    // and the reliable source for OAuth subs whose `wf` block is empty) → agency creds.
+    const companyId = wf?.companyId || acct.resolved.ghlCompanyId || agency?.companyId;
     const userId = wf?.userId || agency?.userId;
 
     const hasFirebase = Boolean(firebaseApiKey && firebaseRefreshToken);
