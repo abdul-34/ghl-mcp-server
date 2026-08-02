@@ -88,6 +88,33 @@ async function collectValidationContext(
   return { knownKeys, appModules };
 }
 
+/**
+ * Flag third-party (marketplace-app) actions so the client stamps the shape the
+ * builder's save path requires (isMarketplaceAction + stepIndex). An action is a
+ * marketplace action if it resolved as an installed app module, OR — when the live
+ * native list is available — if it is neither a native catalog module, a structural
+ * type, nor in the native live list. Mutates the actions in place.
+ */
+function markMarketplaceActions(
+  actions: WorkflowAction[] | undefined,
+  appModules?: Map<string, AppModuleSchema>,
+  knownKeys?: Set<string>
+): void {
+  if (!actions) return;
+  for (const a of actions) {
+    if (!a || typeof a.type !== 'string') continue;
+    const type = a.type;
+    const resolvedApp = Boolean(appModules?.has(type));
+    // Only trust the "not native" heuristic when we actually have the native live
+    // list — otherwise a native module missing from our static catalog could be
+    // mis-flagged. With the list present, "not native + not structural + not listed" = app.
+    const notNative = knownKeys
+      ? !STRUCTURAL_TYPES.has(type) && !lookupNativeModule(type) && !knownKeys.has(type)
+      : false;
+    if (resolvedApp || notNative) a.isMarketplaceAction = true;
+  }
+}
+
 const WORKFLOW_ACTION_SCHEMA: Record<string, any> = {
   type: 'object',
   properties: {
@@ -199,6 +226,7 @@ export const workflowBuilderTools: ToolDef[] = [
                 : 'Fix these (crm_get_native_workflow_module / crm_get_workflow_module / crm_find_workflow_examples), or pass force:true to override only the unknown-type check.')
           );
         }
+        markMarketplaceActions(rawActions, appModules, knownKeys);
       }
 
       const { id } = await wf.createWorkflow(name);
@@ -751,6 +779,7 @@ export const workflowBuilderTools: ToolDef[] = [
                 : 'Fix these, or pass force:true to override only the unknown-type check.')
           );
         }
+        markMarketplaceActions(newActions, appModules, knownKeys);
       }
 
       const workflow = await wf.updateWorkflow(workflowId, {

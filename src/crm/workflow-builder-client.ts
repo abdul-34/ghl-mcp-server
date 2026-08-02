@@ -31,6 +31,12 @@ export interface WorkflowAction {
   cat?: string;
   nodeType?: string;
   sibling?: string[] | null;
+  /** True for third-party marketplace-app actions. The builder's save path REQUIRES
+   *  this flag (a native-looking node with a marketplace key fails to save without it). */
+  isMarketplaceAction?: boolean;
+  /** Per-type instance index the builder assigns to marketplace actions (mirrored in
+   *  workflow meta.stepIndexCounter). */
+  stepIndex?: number;
   [key: string]: unknown;
 }
 
@@ -1096,8 +1102,22 @@ export class WorkflowBuilderClient {
 
     const autoSaveSessionId = this.resolveAutoSaveSessionId(workflowId, current);
 
+    // Marketplace actions carry a per-type stepIndex; the builder mirrors the max
+    // per type in meta.stepIndexCounter. Merge over whatever the workflow already has.
+    const currentMeta = (current.meta && typeof current.meta === 'object' ? current.meta : {}) as Record<string, unknown>;
+    const stepIndexCounter: Record<string, number> = {
+      ...((currentMeta.stepIndexCounter as Record<string, number> | undefined) || {}),
+    };
+    for (const action of actions) {
+      if (action?.isMarketplaceAction && typeof action.stepIndex === 'number' && typeof action.type === 'string') {
+        stepIndexCounter[action.type] = Math.max(stepIndexCounter[action.type] || 0, action.stepIndex);
+      }
+    }
+    const meta = Object.keys(stepIndexCounter).length ? { ...currentMeta, stepIndexCounter } : currentMeta;
+
     const body: Record<string, unknown> = {
       ...current,
+      meta,
       _id: current._id || workflowId,
       id: workflowId,
       locationId: this.config.locationId,
@@ -1336,7 +1356,7 @@ export class WorkflowBuilderClient {
     }));
 
     // Second pass: wire up next/parentKey for actions that don't have explicit linkage
-    return withIds.map((a, i, arr) => {
+    const linked = withIds.map((a, i, arr) => {
       const original = rawActions[i];
       const hasExplicitNext = original.next !== undefined;
       const hasExplicitParent = original.parentKey !== undefined;
@@ -1358,6 +1378,42 @@ export class WorkflowBuilderClient {
           : (i > 0 ? arr[i - 1].id! : null),
       };
     }).map(a => a as WorkflowAction);
+
+    return this.stampMarketplaceActions(linked);
+  }
+
+  /**
+   * Third-party (marketplace-app) actions need extra shape the builder's save path
+   * requires — without it the builder rejects an otherwise-valid node ("saves via
+   * API but fails in the UI"). For each action flagged `isMarketplaceAction`:
+   *   - echo `type` and ensure `__customInputs__` inside `attributes`,
+   *   - assign a per-type `stepIndex` (1-based, continuing past any existing index).
+   * The matching meta.stepIndexCounter is written in buildCommitBody.
+   */
+  private stampMarketplaceActions(actions: WorkflowAction[]): WorkflowAction[] {
+    // Seed per-type counters from any stepIndex already present (updates/clones).
+    const counters: Record<string, number> = {};
+    for (const a of actions) {
+      if (a?.isMarketplaceAction && typeof a.stepIndex === 'number' && typeof a.type === 'string') {
+        counters[a.type] = Math.max(counters[a.type] || 0, a.stepIndex);
+      }
+    }
+
+    return actions.map((a) => {
+      if (!a?.isMarketplaceAction || typeof a.type !== 'string') return a;
+      const attrs = (a.attributes && typeof a.attributes === 'object' ? a.attributes : {}) as Record<string, unknown>;
+      const stepIndex =
+        typeof a.stepIndex === 'number' ? a.stepIndex : (counters[a.type] = (counters[a.type] || 0) + 1);
+      return {
+        ...a,
+        stepIndex,
+        attributes: {
+          __customInputs__: {},
+          ...attrs,
+          type: a.type, // the builder expects the module key echoed inside attributes
+        },
+      };
+    });
   }
 
   /**
