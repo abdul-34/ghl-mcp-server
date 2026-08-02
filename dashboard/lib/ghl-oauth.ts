@@ -116,11 +116,16 @@ async function oauthError(res: Response, op: string): Promise<Error> {
   return new Error(`GHL OAuth ${op} failed (${res.status})${detail ? `: ${detail.slice(0, 400)}` : ''}`);
 }
 
+// /oauth/token is v3; /oauth/locationToken is NOT in v3 (use the stable 2021-07-28).
+const TOKEN_API_VERSION = 'v3';
+const LOCATION_TOKEN_API_VERSION = '2021-07-28';
+
 async function postToken(body: URLSearchParams, bearer?: string): Promise<Response> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
     Accept: 'application/json',
-    Version: 'v3',
+    // locationToken (bearer set) runs on 2021-07-28; the token grant runs on v3.
+    Version: bearer ? LOCATION_TOKEN_API_VERSION : TOKEN_API_VERSION,
   };
   if (bearer) headers.Authorization = `Bearer ${bearer}`;
   return fetch(bearer ? LOCATION_TOKEN_URL : OAUTH_TOKEN_URL, { method: 'POST', headers, body });

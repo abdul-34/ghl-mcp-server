@@ -18,6 +18,11 @@
 const OAUTH_TOKEN_URL = 'https://services.leadconnectorhq.com/oauth/token';
 const LOCATION_TOKEN_URL = 'https://services.leadconnectorhq.com/oauth/locationToken';
 
+// Version headers differ per endpoint: /oauth/token is v3, but /oauth/locationToken
+// is NOT in v3 (GHL: "use a version before v3") — it runs on the stable 2021-07-28.
+const TOKEN_API_VERSION = 'v3';
+const LOCATION_TOKEN_API_VERSION = '2021-07-28';
+
 export interface OAuthTokenResult {
   accessToken: string;
   /** Present on the refresh/authorization-code grant (and location tokens on v3). */
@@ -115,7 +120,7 @@ export async function refreshToken(
   });
   const res = await fetch(OAUTH_TOKEN_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', Version: 'v3' },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', Version: TOKEN_API_VERSION },
     body,
   });
   if (!res.ok) throw await oauthError(res, 'refresh');
@@ -139,7 +144,7 @@ export async function mintLocationToken(
       Authorization: `Bearer ${companyAccessToken}`,
       'Content-Type': 'application/x-www-form-urlencoded',
       Accept: 'application/json',
-      Version: 'v3',
+      Version: LOCATION_TOKEN_API_VERSION,
     },
     body,
   });
