@@ -15,7 +15,8 @@
 const CHOOSE_LOCATION_URL = 'https://marketplace.leadconnectorhq.com/oauth/chooselocation';
 const OAUTH_TOKEN_URL = 'https://services.leadconnectorhq.com/oauth/token';
 const LOCATION_TOKEN_URL = 'https://services.leadconnectorhq.com/oauth/locationToken';
-const INSTALLED_LOCATIONS_URL = 'https://services.leadconnectorhq.com/oauth/installedLocations';
+// v3 renamed this to the hyphenated path (camelCase /oauth/installedLocations was removed).
+const INSTALLED_LOCATIONS_URL = 'https://services.leadconnectorhq.com/oauth/installed-locations';
 
 export interface OAuthTokens {
   accessToken: string;
@@ -150,24 +151,43 @@ export async function mintLocationToken(companyAccessToken: string, companyId: s
   return normalize((await res.json()) as Record<string, unknown>);
 }
 
-/** List the sub-accounts where the agency has installed the app. */
+/**
+ * List the sub-accounts where the agency has installed the app (v3
+ * /oauth/installed-locations). Requires the Agency token + appId, uses
+ * pageSize/pageToken pagination, and returns results under `items[]`.
+ */
 export async function listInstalledLocations(companyAccessToken: string, companyId: string): Promise<InstalledLocation[]> {
   const { appId } = creds();
-  const params = new URLSearchParams({ companyId });
-  if (appId) params.set('appId', appId);
-  const res = await fetch(`${INSTALLED_LOCATIONS_URL}?${params.toString()}`, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${companyAccessToken}`, Accept: 'application/json', Version: 'v3' },
-  });
-  if (!res.ok) throw await oauthError(res, 'installedLocations');
-  const data = (await res.json()) as Record<string, unknown>;
-  const list = Array.isArray(data.locations) ? data.locations : Array.isArray(data) ? (data as unknown[]) : [];
-  return list
-    .map((item) => {
+  if (!appId) throw new Error('GHL_APP_ID is required to list installed locations (v3 /oauth/installed-locations needs appId).');
+
+  const out: InstalledLocation[] = [];
+  let pageToken: string | undefined;
+
+  // Bounded loop so a huge agency (or a bad nextPageToken) can't spin forever.
+  for (let page = 0; page < 25; page++) {
+    const params = new URLSearchParams({ companyId, appId, isInstalled: 'true', pageSize: '100' });
+    if (pageToken) params.set('pageToken', pageToken);
+
+    const res = await fetch(`${INSTALLED_LOCATIONS_URL}?${params.toString()}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${companyAccessToken}`, Accept: 'application/json', Version: 'v3' },
+    });
+    if (!res.ok) throw await oauthError(res, 'installedLocations');
+
+    const data = (await res.json()) as Record<string, unknown>;
+    const items = Array.isArray(data.items) ? data.items : [];
+    for (const item of items) {
       const rec = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
       const locationId = String(rec._id ?? rec.id ?? rec.locationId ?? '');
-      if (!locationId) return null;
-      return { locationId, name: typeof rec.name === 'string' ? rec.name : undefined } as InstalledLocation;
-    })
-    .filter((x): x is InstalledLocation => x !== null);
+      if (!locationId || rec.isInstalled === false) continue;
+      out.push({ locationId, name: typeof rec.name === 'string' ? rec.name : undefined });
+    }
+
+    const pagination = (data.pagination as Record<string, unknown> | undefined) ?? {};
+    const next = typeof pagination.nextPageToken === 'string' ? pagination.nextPageToken : '';
+    if (pagination.hasNextPage === true && next) pageToken = next;
+    else break;
+  }
+
+  return out;
 }
