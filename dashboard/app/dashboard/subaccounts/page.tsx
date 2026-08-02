@@ -8,13 +8,17 @@ export const dynamic = 'force-dynamic';
 
 export default async function SubaccountsPage() {
   const supabase = await createSupabaseServerClient();
-  const [{ data: subaccounts }, installStatus] = await Promise.all([
+  const [{ data: subaccounts }, installStatus, { data: agencyCreds }] = await Promise.all([
     supabase
       .from('subaccounts')
       .select('id, name, location_id, created_at, base_refresh_token, workflow_creds_updated_at, auth_mode')
       .order('created_at', { ascending: false }),
     getInstallStatus(),
+    // Firebase is captured once at the agency level and shared by every sub-account,
+    // so this counts as "workflow ready" for all rows even without a per-row token.
+    supabase.from('agency_builder_tokens').select('firebase_refresh_encrypted').maybeSingle(),
   ]);
+  const agencyHasFirebase = Boolean(agencyCreds?.firebase_refresh_encrypted);
 
   return (
     <div className="space-y-8">
@@ -50,7 +54,7 @@ export default async function SubaccountsPage() {
                     >
                       {s.auth_mode === 'oauth' ? 'OAuth' : 'PIT'}
                     </span>
-                    {s.base_refresh_token ? (
+                    {s.base_refresh_token || agencyHasFirebase ? (
                       <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">
                         workflow ready
                       </span>
