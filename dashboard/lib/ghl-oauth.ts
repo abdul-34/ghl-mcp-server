@@ -57,23 +57,17 @@ export function buildChooseLocationUrl(state: string): string {
   return `${CHOOSE_LOCATION_URL}?${params.toString()}`;
 }
 
-const PARAM_ALIASES: Record<string, string> = {
-  clientId: 'client_id',
-  clientSecret: 'client_secret',
-  grantType: 'grant_type',
-  refreshToken: 'refresh_token',
-  redirectUri: 'redirect_uri',
-  userType: 'user_type',
-};
-
-/** Build form params with both camelCase and snake_case keys for each logical field. */
+/**
+ * Build camelCase-only form params for the v3 token endpoint. GHL's /oauth/token
+ * (Version: v3) validates strictly and REJECTS unknown keys — sending snake_case
+ * duplicates alongside camelCase trips its validator with a 422. So we send only
+ * the camelCase keys the v3 endpoint expects.
+ */
 function tokenParams(fields: Record<string, string | undefined>): URLSearchParams {
   const params = new URLSearchParams();
-  for (const [camel, value] of Object.entries(fields)) {
+  for (const [key, value] of Object.entries(fields)) {
     if (value == null || value === '') continue;
-    params.set(camel, value);
-    const snake = PARAM_ALIASES[camel];
-    if (snake && snake !== camel) params.set(snake, value);
+    params.set(key, value);
   }
   return params;
 }
@@ -102,12 +96,23 @@ function normalize(data: Record<string, unknown>): OAuthTokens {
 async function oauthError(res: Response, op: string): Promise<Error> {
   let detail = '';
   try {
-    const body = (await res.json()) as Record<string, unknown>;
-    detail = String(body.error || body.message || body.error_description || '').slice(0, 200);
+    const raw = await res.text();
+    try {
+      const body = JSON.parse(raw) as Record<string, unknown>;
+      // GHL (NestJS) validation errors put the real reason in `message`, often as
+      // an array (e.g. ["property client_id should not exist"]). Surface that.
+      const msg = body.message;
+      const msgStr = Array.isArray(msg) ? msg.map(String).join('; ') : typeof msg === 'string' ? msg : '';
+      const err = typeof body.error === 'string' ? body.error : '';
+      const desc = typeof body.error_description === 'string' ? body.error_description : '';
+      detail = [msgStr, desc, err].filter(Boolean).join(' — ') || raw;
+    } catch {
+      detail = raw; // non-JSON body
+    }
   } catch {
-    /* non-JSON */
+    /* body unreadable */
   }
-  return new Error(`GHL OAuth ${op} failed (${res.status})${detail ? `: ${detail}` : ''}`);
+  return new Error(`GHL OAuth ${op} failed (${res.status})${detail ? `: ${detail.slice(0, 400)}` : ''}`);
 }
 
 async function postToken(body: URLSearchParams, bearer?: string): Promise<Response> {
