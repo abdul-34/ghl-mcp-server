@@ -177,7 +177,11 @@ test('9. a transition with a missing or mismatched parent relationship is reject
   const t1 = byId(missing, 't-found');
   delete t1.parentKey;
   delete t1.parent;
-  assert.ok(hasIssue(issuesOf(missing), 'transition is missing "parentKey"'), 'expected the missing-parent rejection');
+  const missingIssues = issuesOf(missing);
+  assert.ok(hasIssue(missingIssues, 'transition is missing "parentKey"'), 'expected the missing-parent rejection');
+  // The predicate requires a matching parent link, so a transition without one gets
+  // no exemption either — implementation and documentation agree literally.
+  assert.ok(hasIssue(missingIssues, 'missing required field "attributes.type"'), 'expected the unlinked transition to lose the exemption');
 
   const mismatched = findOpportunityGraph();
   byId(mismatched, 't-found').parentKey = 'note-1'; // an existing node, but not the declaring action

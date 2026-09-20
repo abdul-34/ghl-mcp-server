@@ -122,7 +122,8 @@ export function validateWorkflowGraph(
    *   - type is exactly "transition" (no other structural type is exempted);
    *   - the node declares an id that a multi-path action lists in
    *     attributes.transitions[] (so a free-floating "transition" is NOT exempt);
-   *   - the node's stated parent link, if any, is that same declaring action.
+   *   - the node states a parent link (parentKey, else parent) and it is that same
+   *     declaring action — a transition with no parent link is NOT exempt.
    */
   const isNativeMultipathTransition = (a: WorkflowAction): boolean => {
     if (a.type !== 'transition') return false;
@@ -131,7 +132,7 @@ export function validateWorkflowGraph(
     const parent = branchParentById.get(id);
     if (!parent) return false;
     const link = parentLinkOf(a);
-    return !link || link === parent.id;
+    return link === parent.id;
   };
 
   // Duplicate top-level action ids — every node id must be unique.
