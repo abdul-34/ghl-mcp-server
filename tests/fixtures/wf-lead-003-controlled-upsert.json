@@ -1,0 +1,979 @@
+{
+ "actions": [
+  {
+   "id": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "type": "if_else",
+   "name": "yes",
+   "cat": "conditions",
+   "nodeType": "condition-node",
+   "order": 0,
+   "next": [
+    "5927e2a8-1faf-436e-96bf-45d73971319a",
+    "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+    "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+    "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+    "c6c32f6b-cde2-4acb-9c30-d65d902d1e52"
+   ],
+   "attributes": {
+    "currentRecipeType": "CUSTOM",
+    "operator": "and",
+    "if": true,
+    "conditionName": "Relationship check",
+    "version": 2,
+    "noneBranchName": "None",
+    "branches": [
+     {
+      "id": "5927e2a8-1faf-436e-96bf-45d73971319a",
+      "name": "Active client",
+      "segments": [
+       {
+        "__segmentId": "seg-5927e2a8",
+        "operator": "and",
+        "conditions": [
+         {
+          "conditionType": "contact_detail",
+          "conditionSubType": "tags",
+          "conditionOperator": "index-of-true",
+          "conditionValue": [
+           "client-active"
+          ],
+          "__conditionId": "cnd-5927e2a8",
+          "ifElseNodeId": "",
+          "__customFieldType__": "standard",
+          "isWait": false
+         }
+        ]
+       }
+      ],
+      "operator": "and",
+      "showErrors": false,
+      "branchNameError": "Branch name cannot be empty!"
+     },
+     {
+      "id": "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+      "name": "Past client",
+      "segments": [
+       {
+        "__segmentId": "seg-ebf50227",
+        "operator": "and",
+        "conditions": [
+         {
+          "conditionType": "contact_detail",
+          "conditionSubType": "tags",
+          "conditionOperator": "index-of-true",
+          "conditionValue": [
+           "client-renewal"
+          ],
+          "__conditionId": "cnd-ebf50227",
+          "ifElseNodeId": "",
+          "__customFieldType__": "standard",
+          "isWait": false
+         }
+        ]
+       }
+      ],
+      "operator": "and",
+      "showErrors": false,
+      "branchNameError": "Branch name cannot be empty!"
+     },
+     {
+      "id": "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+      "name": "Creator",
+      "segments": [
+       {
+        "__segmentId": "seg-2a92aeaa",
+        "operator": "and",
+        "conditions": [
+         {
+          "conditionType": "contact_detail",
+          "conditionSubType": "tags",
+          "conditionOperator": "index-of-true",
+          "conditionValue": [
+           "intent-creator"
+          ],
+          "__conditionId": "cnd-2a92aeaa",
+          "ifElseNodeId": "",
+          "__customFieldType__": "standard",
+          "isWait": false
+         }
+        ]
+       }
+      ],
+      "operator": "and",
+      "showErrors": false,
+      "branchNameError": "Branch name cannot be empty!"
+     },
+     {
+      "id": "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+      "name": "Partner",
+      "segments": [
+       {
+        "__segmentId": "seg-d5decf48",
+        "operator": "and",
+        "conditions": [
+         {
+          "conditionType": "contact_detail",
+          "conditionSubType": "tags",
+          "conditionOperator": "index-of-true",
+          "conditionValue": [
+           "intent-partnership"
+          ],
+          "__conditionId": "cnd-d5decf48",
+          "ifElseNodeId": "",
+          "__customFieldType__": "standard",
+          "isWait": false
+         }
+        ]
+       }
+      ],
+      "operator": "and",
+      "showErrors": false,
+      "branchNameError": "Branch name cannot be empty!"
+     }
+    ]
+   }
+  },
+  {
+   "id": "5927e2a8-1faf-436e-96bf-45d73971319a",
+   "type": "if_else",
+   "name": "Active client",
+   "cat": "conditions",
+   "nodeType": "branch-yes",
+   "parent": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "parentKey": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "order": 1,
+   "sibling": [
+    "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+    "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+    "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+    "c6c32f6b-cde2-4acb-9c30-d65d902d1e52"
+   ],
+   "next": "a75075f4-45ea-46eb-8717-600a21a29ca1",
+   "attributes": {
+    "if": false,
+    "conditionName": "Condition",
+    "operator": "and",
+    "branches": []
+   }
+  },
+  {
+   "id": "a75075f4-45ea-46eb-8717-600a21a29ca1",
+   "type": "update_contact_field",
+   "name": "Set Relationship Classification: Active client",
+   "parent": "5927e2a8-1faf-436e-96bf-45d73971319a",
+   "parentKey": "5927e2a8-1faf-436e-96bf-45d73971319a",
+   "order": 0,
+   "next": "0b2043af-ad34-4c18-b3b2-4e0275da79ac",
+   "attributes": {
+    "type": "update_contact_field",
+    "actionType": "update_field_data",
+    "fields": [
+     {
+      "field": "2r0lSghSqAuJ5QZiMXZq",
+      "value": "Active client",
+      "title": "Relationship Classification",
+      "type": "select",
+      "date": ""
+     }
+    ]
+   }
+  },
+  {
+   "id": "0b2043af-ad34-4c18-b3b2-4e0275da79ac",
+   "type": "remove_contact_tag",
+   "name": "Remove lead-new",
+   "parent": "5927e2a8-1faf-436e-96bf-45d73971319a",
+   "parentKey": "a75075f4-45ea-46eb-8717-600a21a29ca1",
+   "order": 1,
+   "next": "14a94dbd-a1d5-49de-8edf-32d7c277121d",
+   "attributes": {
+    "tags": [
+     "lead-new"
+    ],
+    "type": "remove_contact_tag"
+   }
+  },
+  {
+   "id": "14a94dbd-a1d5-49de-8edf-32d7c277121d",
+   "type": "internal_notification",
+   "name": "Internal notification",
+   "parent": "5927e2a8-1faf-436e-96bf-45d73971319a",
+   "parentKey": "0b2043af-ad34-4c18-b3b2-4e0275da79ac",
+   "order": 2,
+   "next": "5911f3fd-8367-4eea-a741-5c33d407db13",
+   "attributes": {
+    "type": "email",
+    "email": {
+     "isCloned": false,
+     "html": "<p style=\"margin:0px;font-family:verdana,geneva,sans-serif;font-size:16px; padding-left: 0px!important;\">WF-LEAD-003 Relationship Check: {{contact.name}} ({{contact.email}}, {{contact.phone}}) submitted a governed lead-generation form or assessment and already carries the client-active tag.</p><p style=\"margin:0px;font-family:verdana,geneva,sans-serif;font-size:16px; padding-left: 0px!important;\">The contact has been classified Active client and kept out of the new-lead acquisition flow.</p><p style=\"margin:0px;font-family:verdana,geneva,sans-serif;font-size:16px; padding-left: 0px!important;\">Please route the enquiry to the account owner.</p>",
+     "subject": "Active client submitted an acquisition enquiry: {{contact.name}}",
+     "userType": "all",
+     "attachments": []
+    }
+   }
+  },
+  {
+   "id": "5911f3fd-8367-4eea-a741-5c33d407db13",
+   "type": "add_notes",
+   "name": "System Note",
+   "parent": "5927e2a8-1faf-436e-96bf-45d73971319a",
+   "parentKey": "14a94dbd-a1d5-49de-8edf-32d7c277121d",
+   "attributes": {
+    "type": "add_notes",
+    "title": "Relationship check: Active client",
+    "html": "<p style=\"padding-left: 0px!important;\">System Note: WF-LEAD-003 Relationship Check</p><p style=\"padding-left: 0px!important;\">Existing relationship found: the contact carries the client-active tag.</p><p style=\"padding-left: 0px!important;\">Classified Active client and removed from the new-lead acquisition flow (lead-new removed). No Agency Acquisition opportunity is created.</p>",
+    "color": "#FEF0C7"
+   },
+   "next": null,
+   "order": 3
+  },
+  {
+   "id": "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+   "type": "if_else",
+   "name": "Past client",
+   "cat": "conditions",
+   "nodeType": "branch-yes",
+   "parent": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "parentKey": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "order": 1,
+   "sibling": [
+    "5927e2a8-1faf-436e-96bf-45d73971319a",
+    "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+    "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+    "c6c32f6b-cde2-4acb-9c30-d65d902d1e52"
+   ],
+   "next": "68114bab-3ae9-4592-afb2-7f1a871c5b80",
+   "attributes": {
+    "if": false,
+    "conditionName": "Condition",
+    "operator": "and",
+    "branches": []
+   }
+  },
+  {
+   "id": "68114bab-3ae9-4592-afb2-7f1a871c5b80",
+   "type": "update_contact_field",
+   "name": "Set Relationship Classification: Past client",
+   "parent": "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+   "parentKey": "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+   "order": 0,
+   "next": "9ebf14cc-faea-43a1-b649-0372c51c9cdc",
+   "attributes": {
+    "type": "update_contact_field",
+    "actionType": "update_field_data",
+    "fields": [
+     {
+      "field": "2r0lSghSqAuJ5QZiMXZq",
+      "value": "Past client",
+      "title": "Relationship Classification",
+      "type": "select",
+      "date": ""
+     }
+    ]
+   }
+  },
+  {
+   "id": "9ebf14cc-faea-43a1-b649-0372c51c9cdc",
+   "type": "remove_contact_tag",
+   "name": "Remove lead-new",
+   "parent": "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+   "parentKey": "68114bab-3ae9-4592-afb2-7f1a871c5b80",
+   "order": 1,
+   "next": "fb4805ab-734d-4cbb-8ea5-94fa26d0f3a7",
+   "attributes": {
+    "tags": [
+     "lead-new"
+    ],
+    "type": "remove_contact_tag"
+   }
+  },
+  {
+   "id": "fb4805ab-734d-4cbb-8ea5-94fa26d0f3a7",
+   "type": "add_notes",
+   "name": "System Note",
+   "parent": "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+   "parentKey": "9ebf14cc-faea-43a1-b649-0372c51c9cdc",
+   "attributes": {
+    "type": "add_notes",
+    "title": "Relationship check: Past client",
+    "html": "<p style=\"padding-left: 0px!important;\">System Note: WF-LEAD-003 Relationship Check</p><p style=\"padding-left: 0px!important;\">Existing relationship found: the contact carries the client-renewal tag.</p><p style=\"padding-left: 0px!important;\">Classified Past client and removed from the new-lead acquisition flow (lead-new removed). No Agency Acquisition opportunity is created.</p>",
+    "color": "#FEF0C7"
+   },
+   "next": null,
+   "order": 2
+  },
+  {
+   "id": "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+   "type": "if_else",
+   "name": "Creator",
+   "cat": "conditions",
+   "nodeType": "branch-yes",
+   "parent": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "parentKey": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "order": 1,
+   "sibling": [
+    "5927e2a8-1faf-436e-96bf-45d73971319a",
+    "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+    "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+    "c6c32f6b-cde2-4acb-9c30-d65d902d1e52"
+   ],
+   "next": "f5f04902-2736-4fbb-91ef-356c2c567640",
+   "attributes": {
+    "if": false,
+    "conditionName": "Condition",
+    "operator": "and",
+    "branches": []
+   }
+  },
+  {
+   "id": "f5f04902-2736-4fbb-91ef-356c2c567640",
+   "type": "update_contact_field",
+   "name": "Set Relationship Classification: Creator",
+   "parent": "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+   "parentKey": "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+   "order": 0,
+   "next": "242b13da-f51b-4efb-87c7-543a77e5325b",
+   "attributes": {
+    "type": "update_contact_field",
+    "actionType": "update_field_data",
+    "fields": [
+     {
+      "field": "2r0lSghSqAuJ5QZiMXZq",
+      "value": "Creator",
+      "title": "Relationship Classification",
+      "type": "select",
+      "date": ""
+     }
+    ]
+   }
+  },
+  {
+   "id": "242b13da-f51b-4efb-87c7-543a77e5325b",
+   "type": "remove_contact_tag",
+   "name": "Remove lead-new",
+   "parent": "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+   "parentKey": "f5f04902-2736-4fbb-91ef-356c2c567640",
+   "order": 1,
+   "next": "f0cf36f0-359a-4bcd-b347-b2592c5c7e72",
+   "attributes": {
+    "tags": [
+     "lead-new"
+    ],
+    "type": "remove_contact_tag"
+   }
+  },
+  {
+   "id": "f0cf36f0-359a-4bcd-b347-b2592c5c7e72",
+   "type": "add_notes",
+   "name": "System Note",
+   "parent": "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+   "parentKey": "242b13da-f51b-4efb-87c7-543a77e5325b",
+   "attributes": {
+    "type": "add_notes",
+    "title": "Relationship check: Creator",
+    "html": "<p style=\"padding-left: 0px!important;\">System Note: WF-LEAD-003 Relationship Check</p><p style=\"padding-left: 0px!important;\">Existing relationship found: the contact carries the intent-creator tag.</p><p style=\"padding-left: 0px!important;\">Classified Creator and removed from the new-lead acquisition flow (lead-new removed). No Agency Acquisition opportunity is created.</p>",
+    "color": "#FEF0C7"
+   },
+   "next": null,
+   "order": 2
+  },
+  {
+   "id": "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+   "type": "if_else",
+   "name": "Partner",
+   "cat": "conditions",
+   "nodeType": "branch-yes",
+   "parent": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "parentKey": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "order": 1,
+   "sibling": [
+    "5927e2a8-1faf-436e-96bf-45d73971319a",
+    "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+    "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+    "c6c32f6b-cde2-4acb-9c30-d65d902d1e52"
+   ],
+   "next": "d5911e03-90dc-423f-8290-2abef02c0656",
+   "attributes": {
+    "if": false,
+    "conditionName": "Condition",
+    "operator": "and",
+    "branches": []
+   }
+  },
+  {
+   "id": "d5911e03-90dc-423f-8290-2abef02c0656",
+   "type": "update_contact_field",
+   "name": "Set Relationship Classification: Partner",
+   "parent": "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+   "parentKey": "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+   "order": 0,
+   "next": "896579c6-6991-42bb-9122-1cc5e0fb7e83",
+   "attributes": {
+    "type": "update_contact_field",
+    "actionType": "update_field_data",
+    "fields": [
+     {
+      "field": "2r0lSghSqAuJ5QZiMXZq",
+      "value": "Partner",
+      "title": "Relationship Classification",
+      "type": "select",
+      "date": ""
+     }
+    ]
+   }
+  },
+  {
+   "id": "896579c6-6991-42bb-9122-1cc5e0fb7e83",
+   "type": "remove_contact_tag",
+   "name": "Remove lead-new",
+   "parent": "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+   "parentKey": "d5911e03-90dc-423f-8290-2abef02c0656",
+   "order": 1,
+   "next": "0812dc74-4ed7-42db-b45f-a9ae14829a04",
+   "attributes": {
+    "tags": [
+     "lead-new"
+    ],
+    "type": "remove_contact_tag"
+   }
+  },
+  {
+   "id": "0812dc74-4ed7-42db-b45f-a9ae14829a04",
+   "type": "add_notes",
+   "name": "System Note",
+   "parent": "d5decf48-33e9-4e37-ab5e-06d0b45be502",
+   "parentKey": "896579c6-6991-42bb-9122-1cc5e0fb7e83",
+   "attributes": {
+    "type": "add_notes",
+    "title": "Relationship check: Partner",
+    "html": "<p style=\"padding-left: 0px!important;\">System Note: WF-LEAD-003 Relationship Check</p><p style=\"padding-left: 0px!important;\">Existing relationship found: the contact carries the intent-partnership tag.</p><p style=\"padding-left: 0px!important;\">Classified Partner and removed from the new-lead acquisition flow (lead-new removed). No Agency Acquisition opportunity is created.</p>",
+    "color": "#FEF0C7"
+   },
+   "next": null,
+   "order": 2
+  },
+  {
+   "id": "c6c32f6b-cde2-4acb-9c30-d65d902d1e52",
+   "type": "if_else",
+   "name": "None",
+   "cat": "conditions",
+   "nodeType": "branch-no",
+   "parent": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "parentKey": "dbb2dfcc-e4e4-4735-b754-a47ea0be8980",
+   "order": 1,
+   "sibling": [
+    "5927e2a8-1faf-436e-96bf-45d73971319a",
+    "ebf50227-a72e-438d-ab31-5a4cf01e64d9",
+    "2a92aeaa-cb90-4e27-9210-c058014ff4d3",
+    "d5decf48-33e9-4e37-ab5e-06d0b45be502"
+   ],
+   "next": "965c3029-c9e2-4881-8f7b-44a998bb45f9",
+   "attributes": {
+    "else": true
+   }
+  },
+  {
+   "id": "965c3029-c9e2-4881-8f7b-44a998bb45f9",
+   "type": "update_contact_field",
+   "name": "Set Relationship Classification: New prospect",
+   "parent": "c6c32f6b-cde2-4acb-9c30-d65d902d1e52",
+   "parentKey": "c6c32f6b-cde2-4acb-9c30-d65d902d1e52",
+   "order": 0,
+   "next": "fa9fcf90-5467-4111-bef7-d3cce4dd08ec",
+   "attributes": {
+    "type": "update_contact_field",
+    "actionType": "update_field_data",
+    "fields": [
+     {
+      "field": "2r0lSghSqAuJ5QZiMXZq",
+      "value": "New prospect",
+      "title": "Relationship Classification",
+      "type": "select",
+      "date": ""
+     }
+    ]
+   }
+  },
+  {
+   "id": "fa9fcf90-5467-4111-bef7-d3cce4dd08ec",
+   "type": "add_contact_tag",
+   "name": "Tag lead-new",
+   "parent": "c6c32f6b-cde2-4acb-9c30-d65d902d1e52",
+   "parentKey": "965c3029-c9e2-4881-8f7b-44a998bb45f9",
+   "order": 1,
+   "next": "3c948c93-679b-47ee-8543-db9d6dbb80ab",
+   "attributes": {
+    "tags": [
+     "lead-new"
+    ]
+   }
+  },
+  {
+   "id": "3c948c93-679b-47ee-8543-db9d6dbb80ab",
+   "type": "add_notes",
+   "name": "System Note",
+   "parent": "c6c32f6b-cde2-4acb-9c30-d65d902d1e52",
+   "parentKey": "fa9fcf90-5467-4111-bef7-d3cce4dd08ec",
+   "attributes": {
+    "type": "add_notes",
+    "title": "Relationship check: New prospect",
+    "html": "<p style=\"padding-left: 0px!important;\">System Note: WF-LEAD-003 Relationship Check</p><p style=\"padding-left: 0px!important;\">No existing client, creator or partner relationship tag was found.</p><p style=\"padding-left: 0px!important;\">Classified New prospect and tagged lead-new. The Agency Acquisition opportunity is synchronised below.</p>",
+    "color": "#FEF0C7"
+   },
+   "next": "b1c2d3e4-1000-4a00-9000-0000000000f1",
+   "order": 2
+  },
+  {
+   "id": "b1c2d3e4-1000-4a00-9000-0000000000f1",
+   "type": "find_opportunity",
+   "name": "Find opportunity",
+   "parent": "c6c32f6b-cde2-4acb-9c30-d65d902d1e52",
+   "parentKey": "3c948c93-679b-47ee-8543-db9d6dbb80ab",
+   "order": 3,
+   "cat": "multi-path",
+   "workflowsActionType": "INTERNAL",
+   "next": [
+    "b1c2d3e4-1000-4a00-9000-0000000000t1",
+    "b1c2d3e4-1000-4a00-9000-0000000000t2"
+   ],
+   "attributes": {
+    "sorting": "latest",
+    "type": "find_opportunity",
+    "__customInputFields__": [
+     {
+      "__customInputs__": {},
+      "filterField": "pipeline_id",
+      "value": "eq",
+      "secondValue": "k22HIIY9kfkHX8vJNnvw"
+     }
+    ],
+    "__customInputs__": {},
+    "cat": "multi-path",
+    "convertToMultipath": true,
+    "transitions": [
+     {
+      "id": "b1c2d3e4-1000-4a00-9000-0000000000t1",
+      "name": "Opportunity Found",
+      "fields": [],
+      "meta": {
+       "__branchKey__": "predefined_Opportunity Found"
+      },
+      "conditionType": "pre-defined"
+     },
+     {
+      "id": "b1c2d3e4-1000-4a00-9000-0000000000t2",
+      "name": "Opportunity Not Found",
+      "fields": [],
+      "meta": {
+       "__branchKey__": "predefined_Opportunity Not Found"
+      },
+      "conditionType": "pre-defined"
+     }
+    ],
+    "__name__": "Find opportunity"
+   }
+  },
+  {
+   "id": "b1c2d3e4-1000-4a00-9000-0000000000t1",
+   "type": "transition",
+   "name": "Opportunity Found",
+   "cat": "transition",
+   "parent": "b1c2d3e4-1000-4a00-9000-0000000000f1",
+   "parentKey": "b1c2d3e4-1000-4a00-9000-0000000000f1",
+   "order": 1,
+   "attributes": {},
+   "next": "b1c2d3e4-1000-4a00-9000-0000000000u1"
+  },
+  {
+   "id": "b1c2d3e4-1000-4a00-9000-0000000000t2",
+   "type": "transition",
+   "name": "Opportunity Not Found",
+   "cat": "transition",
+   "parent": "b1c2d3e4-1000-4a00-9000-0000000000f1",
+   "parentKey": "b1c2d3e4-1000-4a00-9000-0000000000f1",
+   "order": 1,
+   "attributes": {},
+   "next": "b1c2d3e4-1000-4a00-9000-0000000000c1"
+  },
+  {
+   "id": "b1c2d3e4-1000-4a00-9000-0000000000u1",
+   "type": "internal_update_opportunity",
+   "name": "Update opportunity",
+   "parent": "b1c2d3e4-1000-4a00-9000-0000000000t1",
+   "parentKey": "b1c2d3e4-1000-4a00-9000-0000000000t1",
+   "order": 0,
+   "workflowsActionType": "INTERNAL",
+   "next": "b1c2d3e4-1000-4a00-9000-0000000000s1",
+   "attributes": {
+    "allowBackward": true,
+    "type": "internal_update_opportunity",
+    "__customInputs__": {},
+    "__customInputFields__": [
+     {
+      "__customInputs__": {
+       "value": "numerical"
+      },
+      "dataType": "SINGLE_OPTIONS",
+      "filterField": "pipelineId",
+      "value": "k22HIIY9kfkHX8vJNnvw",
+      "valueFieldType": "select"
+     },
+     {
+      "__customInputs__": {
+       "value": "numerical"
+      },
+      "dataType": "SINGLE_OPTIONS",
+      "filterField": "pipelineStageId",
+      "value": "713c6a5f-9db4-419c-8c7a-1705dcd3c7c8",
+      "valueFieldType": "select"
+     },
+     {
+      "__customInputs__": {
+       "value": "numerical"
+      },
+      "dataType": "TEXT",
+      "filterField": "name",
+      "value": "{{contact.name}}",
+      "valueFieldType": "custom-input"
+     },
+     {
+      "__customInputs__": {
+       "value": "numerical"
+      },
+      "dataType": "SINGLE_OPTIONS",
+      "filterField": "status",
+      "value": "open",
+      "valueFieldType": "select"
+     },
+     {
+      "__customInputs__": {
+       "value": "numerical"
+      },
+      "dataType": "NUMERICAL",
+      "filterField": "monetaryValue",
+      "value": "{{custom_values.agency_acquisition_opportunity_value}}",
+      "valueFieldType": "custom-input"
+     }
+    ]
+   }
+  },
+  {
+   "id": "b1c2d3e4-1000-4a00-9000-0000000000s1",
+   "type": "add_notes",
+   "name": "System Note",
+   "parent": "b1c2d3e4-1000-4a00-9000-0000000000t1",
+   "parentKey": "b1c2d3e4-1000-4a00-9000-0000000000u1",
+   "attributes": {
+    "type": "add_notes",
+    "title": "Opportunity synchronisation complete",
+    "html": "<p style=\"padding-left: 0px!important;\">System Note: WF-LEAD-003 Relationship Check</p><p style=\"padding-left: 0px!important;\">The Agency Acquisition opportunity for this contact is synchronised at New Lead, status Open.</p><p style=\"padding-left: 0px!important;\">Created opportunities carry the UTM attribution held by the contact at creation; existing opportunities keep the attribution captured when they were created.</p>",
+    "color": "#FEF0C7"
+   },
+   "next": null,
+   "order": 1
+  },
+  {
+   "id": "b1c2d3e4-1000-4a00-9000-0000000000c1",
+   "type": "internal_create_opportunity",
+   "name": "Create opportunity",
+   "parent": "b1c2d3e4-1000-4a00-9000-0000000000t2",
+   "parentKey": "b1c2d3e4-1000-4a00-9000-0000000000t2",
+   "order": 0,
+   "workflowsActionType": "INTERNAL",
+   "next": "8de24383-97e3-41ca-96ba-1713eb82de52",
+   "attributes": {
+    "pipelineId": "k22HIIY9kfkHX8vJNnvw",
+    "type": "internal_create_opportunity",
+    "__customInputs__": {},
+    "__customInputFields__": [
+     {
+      "__customInputs__": {
+       "value": "numerical"
+      },
+      "dataType": "SINGLE_OPTIONS",
+      "filterField": "pipelineStageId",
+      "value": "713c6a5f-9db4-419c-8c7a-1705dcd3c7c8",
+      "valueFieldType": "select"
+     },
+     {
+      "__customInputs__": {
+       "value": "numerical"
+      },
+      "dataType": "NUMERICAL",
+      "filterField": "monetaryValue",
+      "value": "{{custom_values.agency_acquisition_opportunity_value}}",
+      "valueFieldType": "custom-input"
+     },
+     {
+      "__customInputs__": {},
+      "dataType": "SINGLE_OPTIONS",
+      "filterField": "status",
+      "value": "open",
+      "valueFieldType": "select"
+     },
+     {
+      "__customInputs__": {},
+      "dataType": "TEXT",
+      "filterField": "name",
+      "value": "{{contact.name}}",
+      "valueFieldType": "string"
+     },
+     {
+      "__customInputs__": {},
+      "dataType": "TEXT",
+      "filterField": "custom_fields.sikSAoLZYVr5yPohdCKr",
+      "value": "{{contact.utm_campaign}}",
+      "valueFieldType": "string"
+     },
+     {
+      "__customInputs__": {},
+      "dataType": "TEXT",
+      "filterField": "custom_fields.E1TbasVrB6qwJ95mg3L8",
+      "value": "{{contact.utm_channel}}",
+      "valueFieldType": "string"
+     },
+     {
+      "__customInputs__": {},
+      "dataType": "TEXT",
+      "filterField": "custom_fields.j22CwIy7Vj1w1Ld3DYJz",
+      "value": "{{contact.utm_medium}}",
+      "valueFieldType": "string"
+     },
+     {
+      "__customInputs__": {},
+      "dataType": "TEXT",
+      "filterField": "custom_fields.MbzWHlnf4rgYzgPK3H6N",
+      "value": "{{contact.utm_source}}",
+      "valueFieldType": "string"
+     },
+     {
+      "__customInputs__": {},
+      "dataType": "TEXT",
+      "filterField": "custom_fields.v9fLWoqNkLx5hxaWS9Yr",
+      "value": "{{contact.utm_content}}",
+      "valueFieldType": "string"
+     },
+     {
+      "__customInputs__": {},
+      "dataType": "TEXT",
+      "filterField": "custom_fields.umyNSeU8M0rcCzlfaesd",
+      "value": "{{contact.utm_term}}",
+      "valueFieldType": "string"
+     }
+    ]
+   }
+  },
+  {
+   "id": "8de24383-97e3-41ca-96ba-1713eb82de52",
+   "type": "goto",
+   "name": "Go to",
+   "parent": "b1c2d3e4-1000-4a00-9000-0000000000t2",
+   "parentKey": "b1c2d3e4-1000-4a00-9000-0000000000c1",
+   "order": 1,
+   "attributes": {
+    "targetNodeId": "b1c2d3e4-1000-4a00-9000-0000000000s1",
+    "type": "goto"
+   }
+  }
+ ],
+ "triggers": [
+  {
+   "type": "survey_submission",
+   "name": "ASM-001 Social Media Maturity Assessment",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "survey.id",
+     "value": [
+      "CGFxg8A4jrPF9yepZg8O"
+     ],
+     "title": "Survey is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "survey_submission",
+   "name": "ASM-002 Content Engine Assessment",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "survey.id",
+     "value": [
+      "Ysko7AAFgSMwgoJ3iUpl"
+     ],
+     "title": "Survey is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "survey_submission",
+   "name": "ASM-003 Paid Social Readiness Assessment",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "survey.id",
+     "value": [
+      "3ziI7HyHTgZqqoVXEH6i"
+     ],
+     "title": "Survey is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "survey_submission",
+   "name": "ASM-004 Lead Conversion Assessment",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "survey.id",
+     "value": [
+      "OzESYPqmz2eJisHSeCYU"
+     ],
+     "title": "Survey is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "survey_submission",
+   "name": "ASM-005 Local Visibility Assessment",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "survey.id",
+     "value": [
+      "5759SglGQv7di1bJ6oNr"
+     ],
+     "title": "Survey is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "survey_submission",
+   "name": "ASM-006 Client Growth Assessment",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "survey.id",
+     "value": [
+      "AEFVUSH8BNoowZqOimer"
+     ],
+     "title": "Survey is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "form_submission",
+   "name": "FRM-01-01 General Enquiry",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "form.id",
+     "value": [
+      "mOw2YReWH1MMp0k2fjcp"
+     ],
+     "title": "Form is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "form_submission",
+   "name": "FRM-01-02 Organic Social Enquiry",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "form.id",
+     "value": [
+      "0TmBqDwhFxwyQc2AioJ8"
+     ],
+     "title": "Form is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "form_submission",
+   "name": "FRM-01-03 Paid Social Enquiry",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "form.id",
+     "value": [
+      "CnRkxpC1mQ5bnWD6yCBh"
+     ],
+     "title": "Form is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "form_submission",
+   "name": "FRM-01-04 Creator Enquiry",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "form.id",
+     "value": [
+      "3RC6YTaVtf06dQRxVhBr"
+     ],
+     "title": "Form is",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "type": "form_submission",
+   "name": "FRM-01-05 Partnership Enquiry",
+   "masterType": "highlevel",
+   "active": false,
+   "status": "draft",
+   "conditions": [
+    {
+     "operator": "is-any-of",
+     "field": "form.id",
+     "value": [
+      "5TAz7bcLpwPbmQDCBMFA"
+     ],
+     "title": "Form is",
+     "type": "string"
+    }
+   ]
+  }
+ ]
+}

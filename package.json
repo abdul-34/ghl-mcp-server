@@ -28,7 +28,8 @@
     "start:stdio": "node dist/server.js",
     "start:http": "node dist/http-server.js",
     "prepublishOnly": "npm run build",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs"
   },
   "keywords": [
     "mcp",

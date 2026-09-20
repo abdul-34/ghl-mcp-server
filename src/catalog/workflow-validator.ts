@@ -94,6 +94,47 @@ export function validateWorkflowGraph(
   const ids = new Set<string>();
   collectIds(actions, ids);
 
+  // Index every transition id that a multi-path action declares as one of its
+  // branches, mapped to the action that declared it. Used by the native-transition
+  // exemption (2a) and by the transition-integrity check (6).
+  const branchParentById = new Map<string, WorkflowAction>();
+  for (const a of actions) {
+    if (!a || typeof a !== 'object' || !a.attributes || typeof a.attributes !== 'object') continue;
+    const at = a.attributes as Record<string, unknown>;
+    const trs = Array.isArray(at.transitions) ? (at.transitions as unknown[]) : [];
+    for (const tr of trs) {
+      if (!tr || typeof tr !== 'object') continue;
+      const tid = (tr as Record<string, unknown>).id;
+      if (typeof tid === 'string' && tid) branchParentById.set(tid, a);
+    }
+  }
+
+  /** The declared parent link a transition node states, from parentKey or parent. */
+  const parentLinkOf = (a: WorkflowAction): string => {
+    if (typeof a.parentKey === 'string' && a.parentKey) return a.parentKey;
+    const p = (a as unknown as Record<string, unknown>).parent;
+    return typeof p === 'string' ? p : '';
+  };
+
+  /**
+   * A NATIVE MULTI-PATH TRANSITION — the only node type exempted from the catalog
+   * required-field rule (2). All three conditions must hold:
+   *   - type is exactly "transition" (no other structural type is exempted);
+   *   - the node declares an id that a multi-path action lists in
+   *     attributes.transitions[] (so a free-floating "transition" is NOT exempt);
+   *   - the node states a parent link (parentKey, else parent) and it is that same
+   *     declaring action — a transition with no parent link is NOT exempt.
+   */
+  const isNativeMultipathTransition = (a: WorkflowAction): boolean => {
+    if (a.type !== 'transition') return false;
+    const id = typeof a.id === 'string' ? a.id : '';
+    if (!id) return false;
+    const parent = branchParentById.get(id);
+    if (!parent) return false;
+    const link = parentLinkOf(a);
+    return link === parent.id;
+  };
+
   // Duplicate top-level action ids — every node id must be unique.
   const seenIds = new Set<string>();
   for (const a of actions) {
@@ -143,6 +184,22 @@ export function validateWorkflowGraph(
           }
         }
       }
+    } else if (isNativeMultipathTransition(a)) {
+      // (2a) NATIVE MULTI-PATH TRANSITION — exempt from (2) only.
+      //
+      // The catalog's "transition" entry declares a required input keyed
+      // "attributes.type" (the Branch Type selector the builder shows for
+      // find_contact / wait branches). Rule (2) looks required fields up FLAT on
+      // the attributes object, so the key "attributes.type" can never be satisfied,
+      // and HighLevel's own stored shape for a multi-path branch is `attributes: {}`.
+      // Applying (2) here therefore rejects graphs the platform itself produces.
+      //
+      // Scope: this exemption is deliberately limited to a transition node that a
+      // multi-path action declares as one of its branches. No other structural type
+      // is exempted — in particular "wait" IS catalog-backed with enforceable
+      // required fields ("type", "startAfter") and keeps full validation. The
+      // transition itself remains covered by (3) dangling refs, (5) multipath
+      // symmetry and (6) transition integrity below.
     } else {
       // (2) required fields (skip dynamic modules — values are resolved live)
       const inputs = (mod.inputs as Array<Record<string, unknown>> | undefined) || [];
@@ -170,6 +227,38 @@ export function validateWorkflowGraph(
         issues.push(
           `${label}: "next"/"parentKey" points to node id "${r}" which no action declares. ` +
             `For branching, give the target action (or transition) an explicit matching "id".`
+        );
+      }
+    }
+
+    // (6) transition integrity — a transition node is only meaningful as a declared
+    //     branch of a multi-path action. This is what replaces the catalog
+    //     required-field rule that (2a) skips.
+    if (a.type === 'transition') {
+      const tid = typeof a.id === 'string' ? a.id : '';
+      const parent = tid ? branchParentById.get(tid) : undefined;
+      const link = parentLinkOf(a);
+      if (!tid) {
+        issues.push(
+          `${label}: transition is missing "id" — a branch must declare the id its ` +
+            `multi-path parent lists in attributes.transitions[].`
+        );
+      } else if (!parent) {
+        issues.push(
+          `${label}: transition id "${tid}" is not declared as a branch by any multi-path ` +
+            `action. Add it to the parent action's attributes.transitions[] (and to its ` +
+            `"next" array), or remove this node.`
+        );
+      }
+      if (!link) {
+        issues.push(
+          `${label}: transition is missing "parentKey" — it must point at the multi-path ` +
+            `action that declares this branch.`
+        );
+      } else if (parent && link !== parent.id) {
+        issues.push(
+          `${label}: transition's parent link "${link}" does not match the multi-path action ` +
+            `"${parent.id}" that declares this branch in attributes.transitions[].`
         );
       }
     }
