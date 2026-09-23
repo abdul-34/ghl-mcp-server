@@ -12,6 +12,7 @@
 
 import { CRMClient } from './client.js';
 import { WorkflowBuilderClient } from './workflow-builder-client.js';
+import { FormsBuilderClient } from './forms-builder-client.js';
 import {
   ResolvedLink,
   ResolvedLocation,
@@ -62,6 +63,7 @@ export class CRMClientPool {
   private readonly accounts = new Map<string, Account>();
   private readonly clients = new Map<string, CRMClient>();
   private readonly workflowClients = new Map<string, WorkflowBuilderClient>();
+  private readonly formsClients = new Map<string, FormsBuilderClient>();
   private readonly baseUrl: string;
   private readonly version: string;
   private readonly ownerId?: string;
@@ -148,6 +150,7 @@ export class CRMClientPool {
       // OAuth locations refresh per request; PIT locations return the static token.
       getAccessToken: acct.authMode === 'oauth' ? this.tokenProvider(locationId) : undefined,
       getWorkflowBuilder: () => this.getWorkflowClient(locationId),
+      getFormsBuilder: () => this.getFormsClient(locationId),
     });
     this.clients.set(locationId, client);
     return client;
@@ -245,6 +248,26 @@ export class CRMClientPool {
       },
     });
     this.workflowClients.set(locationId, client);
+    return client;
+  }
+
+  /**
+   * The internal forms-builder client for a sub-account. It authenticates with the
+   * Firebase token-id only, borrowed from the sub-account's workflow client so the
+   * token cache and refresh-token rotation (persisted to Supabase) live in one place.
+   */
+  getFormsClient(locationId: string): FormsBuilderClient {
+    const cached = this.formsClients.get(locationId);
+    if (cached) return cached;
+    if (!this.accounts.has(locationId)) {
+      throw new Error(`Unknown sub-account locationId "${locationId}".`);
+    }
+    const wf = this.getWorkflowClient(locationId);
+    const client = new FormsBuilderClient({
+      locationId,
+      getIdToken: (forceRefresh) => wf.getFirebaseIdToken(forceRefresh),
+    });
+    this.formsClients.set(locationId, client);
     return client;
   }
 

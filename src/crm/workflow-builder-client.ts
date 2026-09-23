@@ -1429,4 +1429,24 @@ export class WorkflowBuilderClient {
   getUserId(): string | undefined {
     return this.config.userId;
   }
+
+  /**
+   * A valid Firebase ID token for other internal GHL APIs that authenticate with
+   * `token-id` (e.g. the forms builder on services.leadconnectorhq.com). Shares this
+   * client's cache and refresh-token rotation, so rotation is persisted in one place.
+   * `forceRefresh` mints a new token even if the cached one looks unexpired (used
+   * after a 401).
+   */
+  async getFirebaseIdToken(forceRefresh = false): Promise<string> {
+    if (!this.config.firebaseApiKey || !this.config.firebaseRefreshToken) {
+      throw new Error(
+        'No Firebase credentials captured for this agency. The forms builder authenticates with the ' +
+          'Firebase token-id only — run the capture extension once on any logged-in CRM tab.'
+      );
+    }
+    if (forceRefresh || !this.cachedIdToken || Date.now() >= this.firebaseTokenExpiry) {
+      await this.refreshFirebaseToken();
+    }
+    return this.cachedIdToken!;
+  }
 }

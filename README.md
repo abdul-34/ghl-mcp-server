@@ -279,6 +279,16 @@ Proposals, SaaS, Snapshots, Social Planner, Store, Surveys.
 Because the full list is large, give each client link a **tool whitelist** in the
 dashboard so it only exposes what that client needs.
 
+### Forms builder (internal API)
+
+The public API can only list forms. The `forms_builder_*` tools create, edit
+(fields, conditional logic, on-submit action, styling), rename and delete forms
+through HighLevel's internal form-builder API. They authenticate with the
+agency's captured Firebase session (run the capture extension once), and every
+write is a validated read-modify-write of the complete form document. See
+[docs/forms-builder-plan.md](docs/forms-builder-plan.md) and
+[docs/api-notes.md](docs/api-notes.md).
+
 ### Regenerating the tools
 
 The tools under `src/tools/generated/` are generated, not hand-edited. To refresh

@@ -9,6 +9,7 @@
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { WorkflowBuilderClient } from './workflow-builder-client.js';
+import { FormsBuilderClient } from './forms-builder-client.js';
 
 export interface CRMClientConfig {
   /**
@@ -35,6 +36,11 @@ export interface CRMClientConfig {
    * inside `workflowBuilder()` if the sub-account has no captured workflow creds.
    */
   getWorkflowBuilder?: () => WorkflowBuilderClient;
+  /**
+   * Lazily resolve the internal forms-builder client for this sub-account.
+   * Injected by the pool; it authenticates with the same captured Firebase session.
+   */
+  getFormsBuilder?: () => FormsBuilderClient;
 }
 
 const DEFAULT_BASE_URL = 'https://services.leadconnectorhq.com';
@@ -53,6 +59,7 @@ export class CRMClient {
   readonly locationId: string;
   private readonly http: AxiosInstance;
   private readonly getWorkflowBuilder?: () => WorkflowBuilderClient;
+  private readonly getFormsBuilder?: () => FormsBuilderClient;
 
   constructor(config: CRMClientConfig) {
     if (!config.accessToken && !config.getAccessToken) {
@@ -62,6 +69,7 @@ export class CRMClient {
 
     this.locationId = config.locationId;
     this.getWorkflowBuilder = config.getWorkflowBuilder;
+    this.getFormsBuilder = config.getFormsBuilder;
 
     const headers: Record<string, string> = {
       Version: config.version || DEFAULT_VERSION,
@@ -129,6 +137,20 @@ export class CRMClient {
       );
     }
     return this.getWorkflowBuilder();
+  }
+
+  /**
+   * The sibling client for GHL's internal forms-builder API (create/update/delete
+   * forms), scoped to the same sub-account. Requires the captured Firebase session.
+   */
+  formsBuilder(): FormsBuilderClient {
+    if (!this.getFormsBuilder) {
+      throw new Error(
+        `Forms builder tools are unavailable for location "${this.locationId}": no captured Firebase ` +
+          `credentials. Run the capture extension once on any logged-in CRM tab, or connect via a link URL.`
+      );
+    }
+    return this.getFormsBuilder();
   }
 
   /**
