@@ -413,6 +413,16 @@ class CRMMcpHttpServer {
           const server = this.buildMcpServer(pool, link);
           await server.connect(newTransport);
           transport = newTransport;
+        } else if (sessionId) {
+          // Sessions live in memory, so a redeploy forgets them. Per the MCP Streamable
+          // HTTP spec an unknown session id gets 404, which tells the client to
+          // re-initialize on its own instead of failing every call until reconnected.
+          res.status(404).json({
+            jsonrpc: '2.0',
+            error: { code: -32001, message: 'Session not found. Start a new session with an initialize request.' },
+            id: (req.body && typeof req.body === 'object' ? (req.body as { id?: unknown }).id : null) ?? null,
+          });
+          return;
         } else {
           res.status(400).json({
             jsonrpc: '2.0',
@@ -434,10 +444,19 @@ class CRMMcpHttpServer {
     const handleMcpSessionRequest = async (req: express.Request, res: express.Response) => {
       try {
         const sessionId = req.headers['mcp-session-id'] as string | undefined;
-        if (!sessionId || !this.sessions[sessionId]) {
+        if (!sessionId) {
           res.status(400).json({
             jsonrpc: '2.0',
-            error: { code: -32000, message: 'Invalid or missing Mcp-Session-Id header' },
+            error: { code: -32000, message: 'Missing Mcp-Session-Id header' },
+            id: null,
+          });
+          return;
+        }
+        if (!this.sessions[sessionId]) {
+          // Unknown (e.g. pre-redeploy) session → 404 so the client re-initializes.
+          res.status(404).json({
+            jsonrpc: '2.0',
+            error: { code: -32001, message: 'Session not found. Start a new session with an initialize request.' },
             id: null,
           });
           return;
