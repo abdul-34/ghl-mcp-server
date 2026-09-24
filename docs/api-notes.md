@@ -34,14 +34,26 @@ Fix: template now carries these (except `company`, `height`, form `width`), and 
 generated from `fieldStyle` on create and on every `set_style` (`src/catalog/form-css.ts`; byte-identical to the
 builder's output for the default style — `tests/fixtures/builder-field-css.json`).
 
+**Clean render check — 2026-09-24 11:57, deployed `36dc08d`+`5d99fa2`:** created `JgtV7tOwzXLNkZbmxbfB` via
+`forms_builder_create_form`, never opened in the builder. Public page, measured in a browser: inputs
+`background rgb(255,255,255)`, `border 1px solid rgb(208,213,221)` (= fieldStyle), Inter loaded
+(`document.fonts.check('16px Inter') === true`), submit label sans-serif. ✅ Stored doc carries fieldCSS,
+submitMessageStyle, formSchedule etc. Thank-you card on a never-builder-saved form: NOT yet observed (form
+deleted before a submission) — re-check on the next API-created form.
+(Earlier form `GvEit9kwWpThjlEzY5nx` is NOT clean evidence — it was builder-saved at 11:56:13 before submit.)
+Builder also adds `style.margin` / `style.mobileMargin` (all "auto") on save — not in our template; harmless.
+
+**MCP session 404 fix (`5d99fa2`) ✅ live:** after the redeploy, this client's stale `Mcp-Session-Id` call
+re-initialized on its own and succeeded (before the fix the same situation returned 400 on every call).
+
 | Endpoint / fact | Status | Evidence |
 |---|---|---|
 | Auth headers: `channel: APP`, `source: WEB_USER`, `version: 2021-07-28`, `token-id: <Firebase ID token>` — all four individually mandatory | ✅ live (server) | Live run 1: agency Firebase capture + these four headers accepted server-side. Blueprint Addendum A header matrix. Missing channel/source/version → 401; `source: INTEGRATION` → 401; Bearer instead of token-id → 401 "Error calling IAM service"; Bearer alongside token-id → 200 (ignored). Server sends no Bearer. |
-| `GET /forms/?locationId&limit&skip[&type]` → `{forms,total,traceId}` | ⚠️ (browser ✅) | Blueprint §2.1. `type=folder` is what the builder UI sends; meaning unconfirmed, so our tool only passes it when asked. |
+| `GET /forms/?locationId&limit&skip[&type]` → `{forms,total,traceId}` | ✅ live (server) | 2026-09-24: `forms_builder_list_forms` returned all 23 NexGenHighLevel forms (`total: 23`) without `type`. Blueprint §2.1. `type=folder` is what the builder UI sends; meaning unconfirmed, so our tool only passes it when asked. |
 | `GET /forms/{id}` → `{form, traceId}` | ✅ live (server) | Live run 1: post-create read-back matched. §2.2 |
 | `POST /forms/` `{name, locationId, formData}` → 201 `{form, traceId}` | ✅ live (server) | Live run 1 created `XGnkJc8D6idVJAarotvI`. §2.3, Addendum B: formData stored verbatim, server injects no style/theme/action. |
 | `POST /forms/{id}` `{name, formData}` → 201, full replace of formData | ⚠️ (browser ✅) | §2.4; `{name}` alone → 422 "formData must be an object". |
-| `DELETE /forms/{id}` → 200 `{…, deleted: true}` | ⚠️ (browser ✅) | §2.5 |
+| `DELETE /forms/{id}` → 200 `{…, deleted: true}` | ✅ live (server) | 2026-09-24: deleted `XGnkJc8D6idVJAarotvI`, `GvEit9kwWpThjlEzY5nx`, `JgtV7tOwzXLNkZbmxbfB` (`deleted: true`, `expectedName` guard); all absent from the list afterwards. §2.5 |
 | Reads lag writes 1–4 s | ⚠️ (browser ✅) | §14.3 — tools poll GET after writes. |
 | `conditionalLogic` shape + enums | ⚠️ (browser ✅) | §8, written/read back identical and observed on the public page. |
 | `currentThemeId: 69df8c1ec7fee340d1abbfa6` works in any location | ✅ live on NexGenHighLevel | Renders themed on a second location (live run 1). Still unproven on other agencies. If a created form renders unthemed elsewhere, create with `templateFormId`. |
