@@ -73,6 +73,7 @@ export const DEFAULT_SUBMIT_FIELD: FormField = {
   subTextFontSize: 14,
   subTextWeight: 200,
   standard: true,
+  hiddenFieldQueryKey: 'button',
 };
 
 export const STANDARD_FIELDS: Record<string, StandardFieldDef> = {

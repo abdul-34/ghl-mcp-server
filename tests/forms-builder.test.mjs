@@ -370,3 +370,42 @@ test('delete_form requires confirm:true and a matching expectedName', async () =
   const res = await tool('forms_builder_delete_form').handler(client, { formId: 'f1', confirm: true, expectedName: 'Lead form' });
   assert.equal(res.deleted, true);
 });
+
+// ─── Builder-generated CSS + builder defaults (live run 1) ───
+
+import { readFileSync } from 'node:fs';
+import { generateFieldCSS } from '../dist/catalog/form-css.js';
+import { DEFAULT_FIELD_STYLE } from '../dist/catalog/form-template.js';
+
+const BUILDER_CSS = JSON.parse(readFileSync(new URL('./fixtures/builder-field-css.json', import.meta.url), 'utf8')).fieldCSS;
+
+test('generated fieldCSS matches what the GHL builder produced for the default style', () => {
+  assert.equal(generateFieldCSS(DEFAULT_FIELD_STYLE), BUILDER_CSS);
+  assert.equal(generateFieldCSS(DEFAULT_FIELD_STYLE, { mobile: true }), BUILDER_CSS);
+});
+
+test('generated fieldCSS follows fieldStyle changes', () => {
+  const css = generateFieldCSS({ ...DEFAULT_FIELD_STYLE, bgColor: '000000FF', primaryColor: 'FF0000FF', border: { border: 2, color: 'ABCDEF12', radius: 10, type: 'dashed' } });
+  assert.match(css, /background-color: #000000FF !important/);
+  assert.match(css, /border: 2px dashed #ABCDEF12 !important/);
+  assert.match(css, /border-radius: 10px !important/);
+  assert.match(css, /box-shadow: 0 0 0 2px #FF0000FF33/);
+  assert.doesNotMatch(css, /#FFFFFFFF !important/);
+});
+
+test('template carries the builder defaults that shape the public page', () => {
+  const form = buildDefaultFormData([buildStandardField('email')]).form;
+  assert.equal(form.submitMessageStyle.isEnabled, true, 'centred thank-you card');
+  assert.equal(form.fieldCSS, BUILDER_CSS, 'input styling + Inter font import');
+  assert.equal(form.mobileFieldCSS, BUILDER_CSS);
+  assert.equal(form.formSchedule.states.after.mode, 'page');
+  assert.equal(form.company, undefined, 'agency branding is left for the builder');
+});
+
+test('set_style regenerates fieldCSS so the change is visible on the page', async () => {
+  const { client, writes } = stubClient(storedForm());
+  await tool('forms_builder_set_style').handler(client, { formId: 'f1', fieldStyle: { bgColor: '000000FF' } });
+  const form = writes[0].formData.form;
+  assert.match(form.fieldCSS, /background-color: #000000FF !important/);
+  assert.match(form.mobileFieldCSS, /background-color: #000000FF !important/);
+});

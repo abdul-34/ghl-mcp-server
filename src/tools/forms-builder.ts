@@ -27,6 +27,7 @@ import {
   payloadKeys,
 } from '../catalog/form-fields.js';
 import { buildDefaultFormData, formDataFromTemplate } from '../catalog/form-template.js';
+import { applyGeneratedCSS } from '../catalog/form-css.js';
 import { validateFormBody, FormValidationResult } from '../catalog/form-validator.js';
 import {
   FieldMutation,
@@ -422,7 +423,11 @@ export const formsBuilderTools: ToolDef[] = [
       } else {
         formData = buildDefaultFormData(fields);
       }
-      if (args.fieldStyle) formData.form.fieldStyle = deepMerge(formData.form.fieldStyle as any, args.fieldStyle);
+      if (args.fieldStyle) {
+        formData.form.fieldStyle = deepMerge(formData.form.fieldStyle as any, args.fieldStyle);
+        // The public page renders inputs from fieldCSS, not fieldStyle.
+        applyGeneratedCSS(formData.form);
+      }
       if (args.formAction) formData.form.formAction = toFormAction(formData.form.formAction as any, args.formAction);
       if (args.conditionalLogic) formData.form.conditionalLogic = args.conditionalLogic;
 
@@ -562,7 +567,12 @@ export const formsBuilderTools: ToolDef[] = [
       }
       return mutateForm(client, args.formId, (_doc, formData) => {
         const form = formData.form;
-        if (args.fieldStyle) form.fieldStyle = deepMerge(form.fieldStyle as any, args.fieldStyle);
+        if (args.fieldStyle) {
+          form.fieldStyle = deepMerge(form.fieldStyle as any, args.fieldStyle);
+          // The public page renders inputs from fieldCSS, not fieldStyle — regenerate it
+          // the way the builder does on save, or the change never shows.
+          applyGeneratedCSS(form);
+        }
         if (args.submitButton) {
           const idx = (form.fields || []).findIndex((f) => f.type === 'submit');
           if (idx < 0) throw new Error('This form has no submit button to style; add one with forms_builder_update_fields (tag "button").');
