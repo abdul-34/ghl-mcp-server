@@ -79,7 +79,7 @@ Reference survey: "Element Catalog Test" `M0L9OqLcV3cwjkPgdC8q`, builder-saved w
 | Endpoint / fact | Status | Evidence |
 |---|---|---|
 | Same four headers as forms (`channel: APP`, `source: WEB_USER`, `version: 2021-07-28`, `token-id`), no Bearer | ⚠️ (browser ✅) | Capture §2. Expired token → `401 "Unauthorized: E003"`. |
-| `GET /surveys/{id}` → `{survey}` | ⚠️ (browser ✅) | Capture §4.3. Called from this server by `surveys_builder_get_survey` (not yet run live). |
+| `GET /surveys/{id}` → `{survey}` | ⚠️ (browser ✅) | Capture §4.3. `surveys_builder_get_survey` deployed (3c56243); no live call recorded yet. |
 | `GET /surveys/?skip&limit&locationId&query&type=survey` → `{surveys,total}` | ⚠️ (browser ✅) | Capture §4.2. |
 | `POST /surveys/` `{locationId, source?, name?}` → 201 `{survey}` with a minimal formData (`form.company`, one empty slide) | ⚠️ (browser ✅) | Capture §4.1. Builder fills the theme only on first UI save. |
 | `POST /surveys/{id}` `{name?, formData?}` → 201 `{data}`; any other top-level key → 422; formData is a full replace | ⚠️ (browser ✅) | Capture §4.4. Partial formData wiped `form` and crashed the builder. `PUT`/`PATCH` → 404. |

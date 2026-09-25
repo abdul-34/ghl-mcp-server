@@ -30,6 +30,7 @@ Tool sources:
 - `tools/ported/` — tool classes ported from Go-High-Level-MCP-2026, bridged via `GHLToolAdapter` onto a per-sub-account `CRMClient`.
 - `tools/workflow-builder.ts`, `workflow-insights.ts` — internal workflow-builder API (`crm/workflow-builder-client.ts`, validated by `catalog/workflow-validator.ts`, native action/trigger catalog in `catalog/native-workflow-catalog.ts` + `catalog/data/`).
 - `tools/forms-builder.ts` — internal `/forms/` API (`crm/forms-builder-client.ts`); every write is a full read-modify-write of the form document, validated by `catalog/form-validator.ts`. `catalog/form-css.ts` regenerates `fieldCSS`/`mobileFieldCSS` from `fieldStyle` exactly as the GHL builder does (fixture: `tests/fixtures/builder-field-css.json`) — the public renderer uses the CSS, not `fieldStyle`.
+- `tools/surveys-builder.ts` — internal `/surveys/` API (`crm/surveys-builder-client.ts`, catalog in `catalog/survey-*.ts`). Same full-document read-modify-write; `create` questions also create their backing contact custom fields (token-id `/locations/{loc}/customFields`) and roll them back on failure. Both builder clients share `crm/internal-builder-http.ts`; shared tool helpers live in `tools/builder-helpers.ts`.
 - `tools/gateway.ts` — when a link has `gateway_mode`, only account tools + `search_ghl_tools` / `get_ghl_tool_schema` / `invoke_ghl_tool` are listed; `invoke_ghl_tool` still routes through the same whitelist/location dispatch.
 - `tools/accounts.ts` — `list_accounts` / `search_accounts`, operate on the pool, always available.
 
@@ -45,6 +46,6 @@ Tool sources:
 
 ## API notes
 
-`docs/api-notes.md` is the source of truth for the internal (undocumented) GHL endpoints — which are ✅ verified live, ⚠️ unconfirmed, or 🚫 known wrong — with evidence. Read it before touching `workflow-builder-client.ts` or `forms-builder-client.ts`, and record new findings there. `docs/forms-builder-plan.md` holds the forms design and production checklist.
+`docs/api-notes.md` is the source of truth for the internal (undocumented) GHL endpoints — which are ✅ verified live, ⚠️ unconfirmed, or 🚫 known wrong — with evidence. Read it before touching `workflow-builder-client.ts`, `forms-builder-client.ts` or `surveys-builder-client.ts`, and record new findings there. `docs/forms-builder-plan.md` and `docs/surveys-builder-plan.md` hold the builder designs and live test plans.
 
 Deploy: `render.yaml` Blueprint (Docker, both services); `/health` reports the tool count.

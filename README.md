@@ -289,6 +289,14 @@ write is a validated read-modify-write of the complete form document. See
 [docs/forms-builder-plan.md](docs/forms-builder-plan.md) and
 [docs/api-notes.md](docs/api-notes.md).
 
+### Surveys builder (internal API)
+
+The `surveys_builder_*` tools create surveys (slides, questions, settings), edit
+their slides and questions, rename and delete them through HighLevel's internal
+survey-builder API, using the same captured Firebase session. Questions that need
+their own answer field get a contact custom field created with the survey, as the
+builder does. See [docs/surveys-builder-plan.md](docs/surveys-builder-plan.md).
+
 ### Regenerating the tools
 
 The tools under `src/tools/generated/` are generated, not hand-edited. To refresh

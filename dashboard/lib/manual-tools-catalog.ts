@@ -8,7 +8,15 @@ export const MANUAL_TOOL_CATALOG: ToolGroup[] = [
   {
     "category": "Surveys Builder",
     "tools": [
-      "surveys_builder_get_survey"
+      "surveys_builder_list_element_types",
+      "surveys_builder_list_surveys",
+      "surveys_builder_get_survey",
+      "surveys_builder_validate_survey",
+      "surveys_builder_create_survey",
+      "surveys_builder_update_questions",
+      "surveys_builder_set_settings",
+      "surveys_builder_rename_survey",
+      "surveys_builder_delete_survey"
     ]
   },
   {
