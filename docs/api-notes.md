@@ -69,3 +69,21 @@ re-initialized on its own and succeeded (before the fix the same situation retur
 | Endpoint | Status | Evidence |
 |---|---|---|
 | `GET /locations/{locationId}/customFields` → `{customFields:[…]}` | 📘 | Generated tool `locations_get_custom_fields` (official OpenAPI). Forms tools read it to build custom elements and validate ids. |
+
+## HighLevel internal surveys builder — `services.leadconnectorhq.com/surveys/`
+
+Source: the owner's survey-builder capture (2026-09-25, NexGenHighLevel white-label `app.cerebrumai.io`,
+location `oIsICGsND5sAh4RdqGe8`). "(browser ✅)" = verified by the owner from the app, not yet from this server.
+Reference survey: "Element Catalog Test" `M0L9OqLcV3cwjkPgdC8q`, builder-saved with every Quick Add element.
+
+| Endpoint / fact | Status | Evidence |
+|---|---|---|
+| Same four headers as forms (`channel: APP`, `source: WEB_USER`, `version: 2021-07-28`, `token-id`), no Bearer | ⚠️ (browser ✅) | Capture §2. Expired token → `401 "Unauthorized: E003"`. |
+| `GET /surveys/{id}` → `{survey}` | ⚠️ (browser ✅) | Capture §4.3. Called from this server by `surveys_builder_get_survey` (not yet run live). |
+| `GET /surveys/?skip&limit&locationId&query&type=survey` → `{surveys,total}` | ⚠️ (browser ✅) | Capture §4.2. |
+| `POST /surveys/` `{locationId, source?, name?}` → 201 `{survey}` with a minimal formData (`form.company`, one empty slide) | ⚠️ (browser ✅) | Capture §4.1. Builder fills the theme only on first UI save. |
+| `POST /surveys/{id}` `{name?, formData?}` → 201 `{data}`; any other top-level key → 422; formData is a full replace | ⚠️ (browser ✅) | Capture §4.4. Partial formData wiped `form` and crashed the builder. `PUT`/`PATCH` → 404. |
+| `DELETE /surveys/{id}` → 200 `{data:{…, deleted:true}}` (soft) | ⚠️ (browser ✅) | Capture §4.5. Custom fields and folder are not deleted with it. |
+| Custom fields via token-id `POST /locations/{loc}/customFields`; folder = `{name, documentType:"folder", model:"contact"}` | ⚠️ (browser ✅) | Capture §6.6. Rating/Score must be created as `NUMERICAL` (`RATING`/`SCORE` → 422). |
+| Survey conditional-logic shape | ⚠️ not captured | Needed before `surveys_builder_set_logic`. |
+| Multi Dropdown element, Collect Payment element | 🟠 inferred | Not in the reference save. |

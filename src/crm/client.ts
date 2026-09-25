@@ -10,6 +10,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { WorkflowBuilderClient } from './workflow-builder-client.js';
 import { FormsBuilderClient } from './forms-builder-client.js';
+import { SurveysBuilderClient } from './surveys-builder-client.js';
 
 export interface CRMClientConfig {
   /**
@@ -41,6 +42,8 @@ export interface CRMClientConfig {
    * Injected by the pool; it authenticates with the same captured Firebase session.
    */
   getFormsBuilder?: () => FormsBuilderClient;
+  /** Lazily resolve the internal surveys-builder client (same Firebase session). */
+  getSurveysBuilder?: () => SurveysBuilderClient;
 }
 
 const DEFAULT_BASE_URL = 'https://services.leadconnectorhq.com';
@@ -60,6 +63,7 @@ export class CRMClient {
   private readonly http: AxiosInstance;
   private readonly getWorkflowBuilder?: () => WorkflowBuilderClient;
   private readonly getFormsBuilder?: () => FormsBuilderClient;
+  private readonly getSurveysBuilder?: () => SurveysBuilderClient;
 
   constructor(config: CRMClientConfig) {
     if (!config.accessToken && !config.getAccessToken) {
@@ -70,6 +74,7 @@ export class CRMClient {
     this.locationId = config.locationId;
     this.getWorkflowBuilder = config.getWorkflowBuilder;
     this.getFormsBuilder = config.getFormsBuilder;
+    this.getSurveysBuilder = config.getSurveysBuilder;
 
     const headers: Record<string, string> = {
       Version: config.version || DEFAULT_VERSION,
@@ -151,6 +156,20 @@ export class CRMClient {
       );
     }
     return this.getFormsBuilder();
+  }
+
+  /**
+   * The sibling client for GHL's internal surveys-builder API, scoped to the same
+   * sub-account. Requires the captured Firebase session.
+   */
+  surveysBuilder(): SurveysBuilderClient {
+    if (!this.getSurveysBuilder) {
+      throw new Error(
+        `Surveys builder tools are unavailable for location "${this.locationId}": no captured Firebase ` +
+          `credentials. Run the capture extension once on any logged-in CRM tab, or connect via a link URL.`
+      );
+    }
+    return this.getSurveysBuilder();
   }
 
   /**

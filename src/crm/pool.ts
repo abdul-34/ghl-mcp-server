@@ -13,6 +13,7 @@
 import { CRMClient } from './client.js';
 import { WorkflowBuilderClient } from './workflow-builder-client.js';
 import { FormsBuilderClient } from './forms-builder-client.js';
+import { SurveysBuilderClient } from './surveys-builder-client.js';
 import {
   ResolvedLink,
   ResolvedLocation,
@@ -64,6 +65,7 @@ export class CRMClientPool {
   private readonly clients = new Map<string, CRMClient>();
   private readonly workflowClients = new Map<string, WorkflowBuilderClient>();
   private readonly formsClients = new Map<string, FormsBuilderClient>();
+  private readonly surveysClients = new Map<string, SurveysBuilderClient>();
   private readonly baseUrl: string;
   private readonly version: string;
   private readonly ownerId?: string;
@@ -151,6 +153,7 @@ export class CRMClientPool {
       getAccessToken: acct.authMode === 'oauth' ? this.tokenProvider(locationId) : undefined,
       getWorkflowBuilder: () => this.getWorkflowClient(locationId),
       getFormsBuilder: () => this.getFormsClient(locationId),
+      getSurveysBuilder: () => this.getSurveysClient(locationId),
     });
     this.clients.set(locationId, client);
     return client;
@@ -268,6 +271,22 @@ export class CRMClientPool {
       getIdToken: (forceRefresh) => wf.getFirebaseIdToken(forceRefresh),
     });
     this.formsClients.set(locationId, client);
+    return client;
+  }
+
+  /** The internal surveys-builder client; same token-id source as getFormsClient. */
+  getSurveysClient(locationId: string): SurveysBuilderClient {
+    const cached = this.surveysClients.get(locationId);
+    if (cached) return cached;
+    if (!this.accounts.has(locationId)) {
+      throw new Error(`Unknown sub-account locationId "${locationId}".`);
+    }
+    const wf = this.getWorkflowClient(locationId);
+    const client = new SurveysBuilderClient({
+      locationId,
+      getIdToken: (forceRefresh) => wf.getFirebaseIdToken(forceRefresh),
+    });
+    this.surveysClients.set(locationId, client);
     return client;
   }
 
