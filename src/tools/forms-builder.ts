@@ -36,6 +36,7 @@ import {
   buildFieldList,
   pruneRulesReferencing,
 } from '../catalog/form-mutations.js';
+import { loadCustomFields, deepMerge, stableStringify } from './builder-helpers.js';
 
 // ─── Shared schemas ──────────────────────────────────────────
 
@@ -139,17 +140,6 @@ const STYLE_FORM_KEYS = [
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-/** Location custom-field registry (public API). Undefined when it can't be loaded. */
-async function loadCustomFields(client: CRMClient): Promise<Map<string, CustomFieldRecord> | undefined> {
-  try {
-    const res = await client.get<{ customFields?: CustomFieldRecord[] }>(`/locations/${client.locationId}/customFields`);
-    const list = Array.isArray(res?.customFields) ? res.customFields : [];
-    return new Map(list.filter((f) => f && f.id).map((f) => [f.id, f]));
-  } catch {
-    return undefined;
-  }
-}
-
 function hasCustomElements(fields: FormField[]): boolean {
   return fields.some((f) => f && (f.custom === true || f.standard === false));
 }
@@ -166,24 +156,6 @@ function toFormAction(existing: Record<string, unknown> | undefined, spec: any):
     throw new Error('formAction.action must be "redirect" or "message".');
   }
   return base;
-}
-
-function deepMerge(target: Record<string, any>, patch: Record<string, any>): Record<string, any> {
-  const out: Record<string, any> = { ...(target || {}) };
-  for (const [k, v] of Object.entries(patch || {})) {
-    out[k] = v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object'
-      ? deepMerge(out[k], v)
-      : v;
-  }
-  return out;
-}
-
-function stableStringify(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
-  if (v && typeof v === 'object') {
-    return `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stableStringify((v as any)[k])}`).join(',')}}`;
-  }
-  return JSON.stringify(v ?? null);
 }
 
 /** Compact, model-friendly view of a form document. */
