@@ -13,6 +13,7 @@
  */
 
 import { InternalBuilderHttp, IdTokenProvider, redact, sleep } from './internal-builder-http.js';
+import { BuilderFolders } from './builder-folders.js';
 
 export interface SurveysBuilderConfig {
   locationId: string;
@@ -83,6 +84,8 @@ export class SurveysApiError extends Error {
 
 export class SurveysBuilderClient {
   readonly locationId: string;
+  /** List-page folders (create, rename, move). */
+  readonly folders: BuilderFolders;
   private readonly http: InternalBuilderHttp;
 
   constructor(config: SurveysBuilderConfig) {
@@ -95,18 +98,27 @@ export class SurveysBuilderClient {
       label: 'GHL Surveys API',
       makeError: (message, status) => new SurveysApiError(message, status),
     });
+    this.folders = new BuilderFolders(this.http, 'surveys', this.locationId);
   }
 
   // ─── Surveys ────────────────────────────────────────────
 
-  async listSurveys(opts: { limit?: number; skip?: number; query?: string } = {}): Promise<SurveyListResult> {
+  /**
+   * Surveys only (type=survey, flat across folders), or with `withFolders` the list-page
+   * view (type=folder): folder rows plus the surveys at one level — the top level, or
+   * inside `parentId`.
+   */
+  async listSurveys(
+    opts: { limit?: number; skip?: number; query?: string; parentId?: string; withFolders?: boolean } = {}
+  ): Promise<SurveyListResult> {
     const params = new URLSearchParams({
       skip: String(opts.skip ?? 0),
       limit: String(opts.limit ?? 20),
       locationId: this.locationId,
       query: opts.query ?? '',
-      type: 'survey',
     });
+    if (opts.parentId) params.set('parentId', opts.parentId);
+    params.set('type', opts.withFolders || opts.parentId ? 'folder' : 'survey');
     const data = await this.http.request<Record<string, unknown>>('GET', `/surveys/?${params.toString()}`);
     return {
       surveys: Array.isArray(data.surveys) ? (data.surveys as Array<Record<string, unknown>>) : [],

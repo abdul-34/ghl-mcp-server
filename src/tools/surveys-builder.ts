@@ -34,6 +34,7 @@ import {
 } from '../catalog/survey-mutations.js';
 import { validateSurveyFormData, SurveyValidationResult } from '../catalog/survey-validator.js';
 import { loadCustomFields, deepMerge, stableStringify } from './builder-helpers.js';
+import { folderTools, moveItem } from './folder-tools.js';
 
 // ─── Shared schemas ──────────────────────────────────────────
 
@@ -61,6 +62,7 @@ const QUESTION_SCHEMA: Record<string, any> = {
     placeholder: { type: 'string' },
     required: { type: 'boolean' },
     hiddenFieldQueryKey: { type: 'string', description: 'URL query param that prefills the question' },
+    hidden: { type: 'boolean', description: 'Hide the element on the page while still submitting its value — pair with hiddenFieldQueryKey (URL prefill) or a default value' },
     props: {
       type: 'object',
       description:
@@ -108,7 +110,7 @@ const OP_SCHEMA: Record<string, any> = {
   description:
     '{op:"add_slide", name?, index?} · {op:"remove_slide", slide} · {op:"move_slide", slide, to} · {op:"rename_slide", slide, name} · ' +
     '{op:"add_question", slide?, question, index?} (slide defaults to the last one, index to the end) · {op:"remove_question", ref} · ' +
-    '{op:"move_question", ref, slide?, index?} · {op:"update_question", ref, label?, placeholder?, required?, hiddenFieldQueryKey?, props?}',
+    '{op:"move_question", ref, slide?, index?} · {op:"update_question", ref, label?, placeholder?, required?, hidden?, hiddenFieldQueryKey?, props?}',
   properties: {
     op: {
       type: 'string',
@@ -124,6 +126,7 @@ const OP_SCHEMA: Record<string, any> = {
     placeholder: { type: 'string' },
     required: { type: 'boolean' },
     hiddenFieldQueryKey: { type: 'string' },
+    hidden: { type: 'boolean' },
     props: { type: 'object' },
   },
   required: ['op'],
@@ -311,6 +314,7 @@ export function summarizeSurvey(doc: SurveyDocument): Record<string, unknown> {
     name: doc.name,
     deleted: doc.deleted === true,
     dateUpdated: doc.dateUpdated,
+    ...(typeof doc.parentId === 'string' ? { folderId: doc.parentId } : {}),
     slideCount: slides.length,
     slides: slides.map((s, index) => {
       const data = Array.isArray(s.slideData) ? s.slideData : [];
@@ -327,6 +331,7 @@ export function summarizeSurvey(doc: SurveyDocument): Record<string, unknown> {
             type: f.type,
             label: f.label,
             required: f.required === true,
+            ...(f.hidden === true ? { hidden: true } : {}),
             custom: f.custom === true || f.standard === false,
             ...(len > 1 ? { children: data.slice(start + 1, start + len).map((c) => c.tag) } : {}),
           };
@@ -493,6 +498,8 @@ async function customFieldsUsedElsewhere(client: CRMClient, surveyId: string): P
 // ─── Tools ───────────────────────────────────────────────────
 
 export const surveysBuilderTools: ToolDef[] = [
+  ...folderTools({ prefix: 'surveys_builder', noun: 'survey', folders: (client) => sb(client).folders }),
+
   defineTool({
     name: 'surveys_builder_list_element_types',
     description:
@@ -526,17 +533,34 @@ export const surveysBuilderTools: ToolDef[] = [
 
   defineTool({
     name: 'surveys_builder_list_surveys',
-    description: 'List surveys in the sub-account (internal builder API), optionally searched by name.',
+    description:
+      'List surveys in the sub-account (internal builder API), optionally searched by name. By default every survey is ' +
+      'listed regardless of folder. folderId lists one folder\'s contents; withFolders lists the top level as the survey ' +
+      'list page shows it (folder rows first, marked type "folder").',
     properties: {
       query: { type: 'string', description: 'Search by name' },
+      folderId: { type: 'string', description: 'List only the surveys in this folder' },
+      withFolders: { type: 'boolean', description: 'Top-level view: folders plus surveys not in a folder' },
       limit: { type: 'number', description: 'Default 20' },
       skip: { type: 'number' },
     },
     handler: async (client, args) => {
-      const res = await sb(client).listSurveys({ query: args.query, limit: args.limit, skip: args.skip });
+      const res = await sb(client).listSurveys({
+        query: args.query,
+        limit: args.limit,
+        skip: args.skip,
+        parentId: args.folderId,
+        withFolders: args.withFolders === true,
+      });
       return {
         total: res.total,
-        surveys: res.surveys.map((s) => ({ id: s._id, name: s.name, dateUpdated: s.dateUpdated ?? s.updatedAt })),
+        surveys: res.surveys.map((s) => ({
+          id: s._id,
+          name: s.name,
+          ...(s.type === 'folder' ? { type: 'folder' } : {}),
+          ...(typeof s.parentId === 'string' ? { folderId: s.parentId } : {}),
+          dateUpdated: s.dateUpdated ?? s.updatedAt,
+        })),
       };
     },
   }),
@@ -603,6 +627,7 @@ export const surveysBuilderTools: ToolDef[] = [
       slides: { type: 'array', items: SLIDE_SCHEMA, description: 'Slides in order' },
       settings: SETTINGS_SCHEMA,
       templateSurveyId: { type: 'string' },
+      folderId: { type: 'string', description: 'Put the new survey in this folder (from surveys_builder_list_folders)' },
     },
     required: ['name', 'slides'],
     handler: async (client, args) => {
@@ -615,6 +640,9 @@ export const surveysBuilderTools: ToolDef[] = [
       const needsRegistry = specs.some((s) => s?.customFieldId || s?.create);
       const registry = needsRegistry ? await loadCustomFields(client) : undefined;
       if (specs.some((s) => s?.customFieldId) && !registry) throw new Error('Could not load this location\'s custom fields.');
+
+      // Check the folder first, so a bad id creates nothing.
+      const folder = args.folderId ? await surveys.folders.require(args.folderId) : undefined;
 
       let base: SurveyFormData | undefined;
       const notes: string[] = [];
@@ -660,8 +688,19 @@ export const surveysBuilderTools: ToolDef[] = [
         const { verified, doc } = await writeAndVerify(surveys, survey._id, name, formData);
         const summary = summarizeSurvey(doc);
         if (!summary.builderSaved) notes.push(API_ONLY_NOTE);
+        let folderResult: Record<string, unknown> | undefined;
+        if (folder) {
+          try {
+            folderResult = await moveItem(surveys.folders, survey._id, folder._id);
+            summary.folderId = folder._id;
+          } catch (err) {
+            // The survey itself is complete; report the failed move instead of undoing it.
+            folderResult = { error: `Created at the top level; moving it into "${folder.name}" failed: ${(err as Error).message}` };
+          }
+        }
         return {
           message: `Survey "${name}" created`,
+          ...(folderResult ? { folder: folderResult } : {}),
           verified,
           ...(verified ? {} : { verificationNote: NOT_VERIFIED_NOTE }),
           ...(created.fieldIds.length ? { createdCustomFields: created.fieldIds, customFieldFolderId: created.folderId } : {}),

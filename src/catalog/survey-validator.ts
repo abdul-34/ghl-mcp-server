@@ -77,6 +77,9 @@ export function validateSurveyFormData(fd: SurveyFormData, opts: SurveyValidateO
       else if (uuids.has(el.uuid)) issues.push(`${at} (${el.tag}): duplicate uuid "${el.uuid}".`);
       else uuids.add(el.uuid);
 
+      if (el.hidden === true && el.required === true) {
+        warnings.push(`${at} (${el.tag}) is hidden and required: submission fails unless it is prefilled via ?${el.hiddenFieldQueryKey || el.tag}=…`);
+      }
       if (el.type === 'payment') issues.push(`${at}: payment elements are not supported by these tools.`);
 
       const custom = el.custom === true || el.standard === false;

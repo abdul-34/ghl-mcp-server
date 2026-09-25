@@ -12,6 +12,7 @@
  */
 
 import { InternalBuilderHttp, IdTokenProvider, redact, sleep } from './internal-builder-http.js';
+import { BuilderFolders } from './builder-folders.js';
 
 export type { IdTokenProvider };
 
@@ -69,6 +70,8 @@ export class FormsApiError extends Error {
 
 export class FormsBuilderClient {
   readonly locationId: string;
+  /** List-page folders (create, rename, move). */
+  readonly folders: BuilderFolders;
   private readonly http: InternalBuilderHttp;
 
   constructor(config: FormsBuilderConfig) {
@@ -81,17 +84,26 @@ export class FormsBuilderClient {
       label: 'GHL Forms API',
       makeError: (message, status) => new FormsApiError(message, status),
     });
+    this.folders = new BuilderFolders(this.http, 'forms', this.locationId);
   }
 
   // ─── CRUD ───────────────────────────────────────────────
 
-  async listForms(opts: { limit?: number; skip?: number; type?: string } = {}): Promise<FormListResult> {
+  /**
+   * All forms (no type; live-verified), or the list-page view of one folder level:
+   * `parentId` → that folder's contents; `type: "folder"` → folder rows plus top-level
+   * forms. The folder views send productType=form like the list UI.
+   */
+  async listForms(opts: { limit?: number; skip?: number; type?: string; parentId?: string } = {}): Promise<FormListResult> {
     const params = new URLSearchParams({
       locationId: this.locationId,
       limit: String(opts.limit ?? 20),
       skip: String(opts.skip ?? 0),
     });
-    if (opts.type) params.set('type', opts.type);
+    if (opts.parentId) params.set('parentId', opts.parentId);
+    const type = opts.parentId ? 'folder' : opts.type;
+    if (type) params.set('type', type);
+    if (type === 'folder') params.set('productType', 'form');
     const data = await this.request<Record<string, unknown>>('GET', `/forms/?${params.toString()}`);
     return {
       forms: Array.isArray(data.forms) ? (data.forms as Array<Record<string, unknown>>) : [],

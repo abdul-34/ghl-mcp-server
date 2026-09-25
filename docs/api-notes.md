@@ -62,6 +62,8 @@ re-initialized on its own and succeeded (before the fix the same situation retur
 | API-created forms open and save in the GHL builder UI | ✅ live | Owner saved `XGnkJc8D6idVJAarotvI` in the builder 2026-09-24 11:26 without error. |
 | Portability to standard (non-white-label) GHL | ⚠️ | §14.11 — production checklist step 9. |
 | `opportunitySettings`, notifications, folders, duplicate, themes, `jumpTo` | ⚠️ excluded | Bundle-derived names only; not implemented in v1. |
+| Element `hidden: true` hides a field while still submitting it (prefill via `hiddenFieldQueryKey`) | ⚠️ forms / ✅ surveys | 2026-09-25: owner confirmed on surveys. Forms: same key (same builder family), exposed as `hidden` on field specs and update `changes`; not yet confirmed on a form's public page. Before this change the schema rejected `hidden`, so the client reported it could not be set. |
+| Form folders | see folders section below | List-page folders use `parentId` on the form plus `/forms/folder` endpoints. `formData.parentFolderId` / `parentFolderName` are unrelated to list placement. |
 | Public `POST backend.leadconnectorhq.com/forms/submit` | ✅ live (browser), not a tool | Live run 1: submission on an API-created form succeeded. §10; creates real contacts, captcha forms need Turnstile. Not exposed as a tool. |
 
 ## HighLevel public custom fields (used by the forms builder)
@@ -87,3 +89,22 @@ Reference survey: "Element Catalog Test" `M0L9OqLcV3cwjkPgdC8q`, builder-saved w
 | Custom fields via token-id `POST /locations/{loc}/customFields`; folder = `{name, documentType:"folder", model:"contact"}` | ⚠️ (browser ✅) | Capture §6.6. Rating/Score must be created as `NUMERICAL` (`RATING`/`SCORE` → 422). |
 | Survey conditional-logic shape | ⚠️ not captured | Needed before `surveys_builder_set_logic`. |
 | Multi Dropdown element, Collect Payment element | 🟠 inferred | Not in the reference save. |
+
+## HighLevel list-page folders — surveys and forms
+
+Source: Claude-in-Chrome capture on the Surveys and Forms list pages, 2026-09-25 16:56–17:12 UTC, NexGenHighLevel
+location `oIsICGsND5sAh4RdqGe8`. Full request and response bodies came from an in-page XHR/fetch recorder. Same token-id
+headers as the builders. `{p}` = `surveys` or `forms`. Forms calls add `productType: "form"` (list/create body and query),
+except rename. Implemented in `src/crm/builder-folders.ts`. Status is (browser ✅) until this server makes the calls.
+
+| Endpoint / fact | Status | Evidence |
+|---|---|---|
+| Folder = row in the same collection with `type: "folder"` (+ `productType: "form"` for forms); item belongs via `parentId`, key absent at top level | ⚠️ (browser ✅) | A4–A6, B4–B6, C2 (root move removes `parentId`). |
+| `GET /{p}/folder?locationId[&productType=form]` → `{folders[]}` | ⚠️ (browser ✅) | Move-modal picker, A4/B4. |
+| `GET /{p}/folder/{id}` → `{folder}` | ⚠️ (browser ✅) | Breadcrumb, A5/B5. |
+| `POST /{p}/folder/` `{name, locationId[, productType]}` → 201 **flat** folder + traceId | ⚠️ (browser ✅) | A2 → `n956PlBp18GBX3thCrZD`, B2 → `0QJ8pgdI79S3TyubQE68`. |
+| `POST /{p}/folder/{id}` `{name}` → 201 `{form: folder}` (wrapper is `form` for surveys too) | ⚠️ (browser ✅) | C1, C3. |
+| `POST /{p}/move-to-folder` `{surveyId|formId, folderId}` → 201 `{form: item}` with `parentId`; `folderId: "root"` = top level | ⚠️ (browser ✅) | A4, B4, C2, C4. Forms root-move response had no `_id`. |
+| `GET /{p}/?…&parentId={folder}&type=folder[&productType=form]` = folder contents; `type=folder` without parentId = top level incl. folder rows; surveys `type=survey` = flat, all surveys | ⚠️ (browser ✅) | A1, A5, A6, B1, B5, B6. |
+| Folder delete, nested folders, pagination > 20 | ⚠️ not captured | Not implemented. |
+| `POST /forms/{id}` with `name` only → 422 `formData must be an object`; surveys accept `name` alone | ✅ (browser) | B3 rename attempt. Our forms tools always send formData. |

@@ -541,3 +541,15 @@ test('summary counts the address group as one question', () => {
   assert.deepEqual(s.slides[0].questions[2].children, ['address', 'city', 'state', 'country', 'postal_code']);
   assert.equal(s.builderSaved, false);
 });
+
+test('survey questions accept hidden in the schema and store it', async () => {
+  const q = tool('surveys_builder_create_survey').tool.inputSchema.properties.slides.items.properties.questions.items;
+  assert.equal(q.properties.hidden.type, 'boolean');
+  const fd = freshSurvey();
+  applySurveyOps(fd, [{ op: 'add_question', question: { tag: 'source', hidden: true } }, { op: 'update_question', ref: { uuid: 'u1' }, hidden: true }], ctx());
+  assert.equal(fd.slides[0].slideData.at(-1).hidden, true);
+  assert.equal(fd.slides[0].slideData[0].hidden, true);
+  const s = summarizeSurvey({ ...SURVEY, formData: fd });
+  assert.equal(s.slides[0].questions[0].hidden, true);
+  assert.match(validateSurveyFormData(fd).warnings.join(), /hidden and required/);
+});

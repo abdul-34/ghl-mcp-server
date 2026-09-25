@@ -86,6 +86,9 @@ export function validateFormBody(form: FormBody, opts: FormValidateOptions = {})
         issues.push(`${at}: custom field id "${f.tag}" does not exist in this location's custom-field registry.`);
       }
     }
+    if (f.hidden === true && f.required === true) {
+      warnings.push(`${at} ("${f.tag}") is hidden and required: submission fails unless it is prefilled via ?${f.hiddenFieldQueryKey || f.tag}=…`);
+    }
     if (f.type === 'submit') {
       for (const k of ['bgColor', 'color', 'borderColor']) checkColor(issues, `${at}.${k}`, f[k]);
     }

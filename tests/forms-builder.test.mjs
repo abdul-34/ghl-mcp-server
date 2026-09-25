@@ -409,3 +409,37 @@ test('set_style regenerates fieldCSS so the change is visible on the page', asyn
   assert.match(form.fieldCSS, /background-color: #000000FF !important/);
   assert.match(form.mobileFieldCSS, /background-color: #000000FF !important/);
 });
+
+// ─── Hidden fields ───────────────────────────────────────────
+
+test('the published field schemas accept hidden (add and update)', () => {
+  const create = tool('forms_builder_create_form').tool.inputSchema.properties.fields.items;
+  assert.equal(create.properties.hidden.type, 'boolean');
+  const upd = tool('forms_builder_update_fields').tool.inputSchema.properties.mutations.items;
+  assert.equal(JSON.stringify(upd).includes('"hidden":{"type":"boolean"'), true);
+});
+
+test('create_form stores hidden: true and the summary reports it', async () => {
+  const { client, writes } = stubClient();
+  const res = await tool('forms_builder_create_form').handler(client, {
+    name: 'ZZ hidden', fields: [{ tag: 'email', required: true }, { tag: 'source', hidden: true, hiddenFieldQueryKey: 'utm_source' }],
+  });
+  const src = writes[0].formData.form.fields.find((f) => f.tag === 'source');
+  assert.equal(src.hidden, true);
+  assert.equal(src.hiddenFieldQueryKey, 'utm_source');
+  assert.equal(res.form.fields.find((f) => f.tag === 'source').hidden, true);
+});
+
+test('update op toggles hidden on an existing element', () => {
+  const { fields } = applyFieldMutations(buildFieldList([{ tag: 'first_name' }], CTX), [{ op: 'update', ref: { tag: 'first_name' }, changes: { hidden: true } }], CTX);
+  assert.equal(fields[0].hidden, true);
+  const back = applyFieldMutations(fields, [{ op: 'update', ref: { tag: 'first_name' }, changes: { hidden: false } }], CTX);
+  assert.equal(back.fields[0].hidden, false);
+});
+
+test('validator warns when a hidden field is also required', () => {
+  const fields = buildFieldList([{ tag: 'email', hidden: true, required: true }], CTX);
+  const res = validateFormBody({ fields });
+  assert.equal(res.valid, true);
+  assert.match(res.warnings.join(), /hidden and required.*\?email=/);
+});

@@ -22,6 +22,8 @@ export interface QuestionOverrides {
   placeholder?: string;
   required?: boolean;
   hiddenFieldQueryKey?: string;
+  /** Hidden element: not shown on the page, value still submitted. */
+  hidden?: boolean;
   /** Type-specific props merged last (e.g. html, format, rating count). */
   props?: Record<string, unknown>;
 }
@@ -56,6 +58,7 @@ function applyOverrides(el: SurveyElement, o: QuestionOverrides): void {
   if (o.placeholder !== undefined) el.placeholder = o.placeholder;
   if (o.required !== undefined) el.required = o.required;
   if (o.hiddenFieldQueryKey !== undefined) el.hiddenFieldQueryKey = o.hiddenFieldQueryKey;
+  if (o.hidden !== undefined) el.hidden = o.hidden;
   if (o.props && typeof o.props === 'object') {
     for (const [k, v] of Object.entries(o.props)) {
       if (IDENTITY_KEYS.has(k)) continue;

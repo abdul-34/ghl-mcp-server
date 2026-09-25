@@ -16,7 +16,11 @@ export const MANUAL_TOOL_CATALOG: ToolGroup[] = [
       "surveys_builder_update_questions",
       "surveys_builder_set_settings",
       "surveys_builder_rename_survey",
-      "surveys_builder_delete_survey"
+      "surveys_builder_delete_survey",
+      "surveys_builder_list_folders",
+      "surveys_builder_create_folder",
+      "surveys_builder_rename_folder",
+      "surveys_builder_move_survey"
     ]
   },
   {
@@ -32,7 +36,11 @@ export const MANUAL_TOOL_CATALOG: ToolGroup[] = [
       "forms_builder_set_form_action",
       "forms_builder_set_style",
       "forms_builder_rename_form",
-      "forms_builder_delete_form"
+      "forms_builder_delete_form",
+      "forms_builder_list_folders",
+      "forms_builder_create_folder",
+      "forms_builder_rename_folder",
+      "forms_builder_move_form"
     ]
   },
   {

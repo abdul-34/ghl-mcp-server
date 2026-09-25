@@ -143,7 +143,7 @@ export function applyFieldMutations(
         const idx = resolveRef(out, m.ref, at);
         const changes = m.changes || {};
         const target = out[idx] as Record<string, unknown>;
-        for (const k of ['label', 'placeholder', 'required', 'fieldWidthPercentage', 'hiddenFieldQueryKey'] as const) {
+        for (const k of ['label', 'placeholder', 'required', 'fieldWidthPercentage', 'hiddenFieldQueryKey', 'hidden'] as const) {
           if (changes[k] !== undefined) target[k] = changes[k];
         }
         if (changes.label !== undefined && target.custom === true) {

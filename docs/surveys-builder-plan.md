@@ -19,8 +19,9 @@ internal builder API, authenticated with the agency's captured Firebase session 
 | `surveys_builder_set_settings` | Thank-you message or redirect, progress bar, back button, auto-advance, schedule |
 | `surveys_builder_rename_survey` | Name only |
 | `surveys_builder_delete_survey` | Soft delete; optional cleanup of the survey's own custom fields |
+| `surveys_builder_list_folders` / `_create_folder` / `_rename_folder` / `_move_survey` | List-page folders (shared with forms via `crm/builder-folders.ts` and `tools/folder-tools.ts`); `folderId` on create and list |
 
-Not in v1: payment elements, image elements, survey logic (shape not captured yet), editing the answer
+Not in v1: folder delete and nested folders (not captured), payment elements, image elements, survey logic (shape not captured yet), editing the answer
 options of an existing question (they belong to the backing custom field).
 
 ## 2. Architecture

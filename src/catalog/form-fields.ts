@@ -227,6 +227,8 @@ export interface FieldOverrides {
   required?: boolean;
   fieldWidthPercentage?: number;
   hiddenFieldQueryKey?: string;
+  /** Hidden element: not shown on the page, value still submitted. */
+  hidden?: boolean;
   /** Type-specific props merged last (e.g. html, bgColor, picklist display). */
   props?: Record<string, unknown>;
 }
@@ -237,6 +239,7 @@ function applyOverrides(field: Record<string, unknown>, o: FieldOverrides): void
   if (o.required !== undefined) field.required = o.required;
   if (o.fieldWidthPercentage !== undefined) field.fieldWidthPercentage = o.fieldWidthPercentage;
   if (o.hiddenFieldQueryKey !== undefined) field.hiddenFieldQueryKey = o.hiddenFieldQueryKey;
+  if (o.hidden !== undefined) field.hidden = o.hidden;
   if (o.props && typeof o.props === 'object') {
     for (const [k, v] of Object.entries(o.props)) {
       if (k === 'tag' || k === 'id' || k === 'type') continue; // identity is not overridable

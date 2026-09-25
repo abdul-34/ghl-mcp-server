@@ -37,6 +37,7 @@ import {
   pruneRulesReferencing,
 } from '../catalog/form-mutations.js';
 import { loadCustomFields, deepMerge, stableStringify } from './builder-helpers.js';
+import { folderTools, moveItem } from './folder-tools.js';
 
 // ─── Shared schemas ──────────────────────────────────────────
 
@@ -46,6 +47,7 @@ const FIELD_OVERRIDE_PROPS: Record<string, any> = {
   required: { type: 'boolean' },
   fieldWidthPercentage: { type: 'number', description: '1–100; default 100' },
   hiddenFieldQueryKey: { type: 'string', description: 'URL query param that prefills the field' },
+  hidden: { type: 'boolean', description: 'Hide the element on the page while still submitting its value — pair with hiddenFieldQueryKey (URL prefill) or a default value' },
   props: {
     type: 'object',
     description:
@@ -167,6 +169,7 @@ export function summarizeForm(doc: FormDocument): Record<string, unknown> {
     name: doc.name,
     deleted: doc.deleted === true,
     dateUpdated: doc.dateUpdated,
+    ...(typeof doc.parentId === 'string' ? { folderId: doc.parentId } : {}),
     fieldCount: fields.length,
     fields: fields.map((f, index) => ({
       index,
@@ -174,6 +177,7 @@ export function summarizeForm(doc: FormDocument): Record<string, unknown> {
       type: f.type,
       label: f.label,
       required: f.required === true,
+      ...(f.hidden === true ? { hidden: true } : {}),
       custom: f.custom === true || f.standard === false,
     })),
     submissionKeys: Array.from(payloadKeys(fields).keys()),
@@ -254,6 +258,8 @@ function fb(client: CRMClient): FormsBuilderClient {
 // ─── Tools ───────────────────────────────────────────────────
 
 export const formsBuilderTools: ToolDef[] = [
+  ...folderTools({ prefix: 'forms_builder', noun: 'form', folders: (client) => fb(client).folders }),
+
   defineTool({
     name: 'forms_builder_list_field_types',
     description:
@@ -296,14 +302,18 @@ export const formsBuilderTools: ToolDef[] = [
 
   defineTool({
     name: 'forms_builder_list_forms',
-    description: 'List forms in a sub-account via the internal forms-builder API (ids and names).',
+    description:
+      'List forms in a sub-account via the internal forms-builder API (ids and names). By default every form is listed ' +
+      'regardless of folder. folderId lists one folder\'s contents; type "folder" lists the top level as the form list ' +
+      'page shows it (folder rows first, marked type "folder").',
     properties: {
       limit: { type: 'number', description: 'Default 20' },
       skip: { type: 'number', description: 'Default 0' },
-      type: { type: 'string', description: 'Optional list type filter passed through as-is (the builder UI sends "folder")' },
+      folderId: { type: 'string', description: 'List only the forms in this folder' },
+      type: { type: 'string', description: '"folder" = top-level view with folder rows; other values are passed through as-is' },
     },
     handler: async (client, args) => {
-      const res = await fb(client).listForms({ limit: args.limit, skip: args.skip, type: args.type });
+      const res = await fb(client).listForms({ limit: args.limit, skip: args.skip, type: args.type, parentId: args.folderId });
       return {
         total: res.total,
         forms: res.forms.map((f) => ({
@@ -312,6 +322,7 @@ export const formsBuilderTools: ToolDef[] = [
           dateAdded: f.dateAdded,
           dateUpdated: f.dateUpdated,
           ...(f.type ? { type: f.type } : {}),
+          ...(typeof f.parentId === 'string' ? { folderId: f.parentId } : {}),
         })),
       };
     },
@@ -374,6 +385,7 @@ export const formsBuilderTools: ToolDef[] = [
         type: 'string',
         description: 'Copy styling/settings from this existing form instead of the built-in default (its fields and logic are not copied).',
       },
+      folderId: { type: 'string', description: 'Put the new form in this folder (from forms_builder_list_folders)' },
     },
     required: ['name', 'fields'],
     handler: async (client, args) => {
@@ -408,19 +420,34 @@ export const formsBuilderTools: ToolDef[] = [
       });
       if (!check.valid) throw new Error(`Form not created — validation failed:\n- ${check.issues.join('\n- ')}`);
 
+      // Check the folder first, so a bad id creates nothing.
+      const folder = args.folderId ? await forms.folders.require(args.folderId) : undefined;
+
       const created = await forms.createForm(name, formData);
       const expected = stableStringify(formData.form);
       const { verified, doc } = await forms.waitForForm(
         created._id,
         (d) => stableStringify(d.formData?.form) === expected
       );
+      const summary = summarizeForm(doc || created);
+      let folderResult: Record<string, unknown> | undefined;
+      if (folder) {
+        try {
+          folderResult = await moveItem(forms.folders, created._id, folder._id);
+          summary.folderId = folder._id;
+        } catch (err) {
+          // The form itself is complete; report the failed move instead of undoing it.
+          folderResult = { error: `Created at the top level; moving it into "${folder.name}" failed: ${(err as Error).message}` };
+        }
+      }
       return {
         message: `Form "${name}" created`,
+        ...(folderResult ? { folder: folderResult } : {}),
         verified,
         ...(verified ? {} : { verificationNote: 'Created, but the read-back did not match yet. Re-check with forms_builder_get_form.' }),
         notes,
         warnings: check.warnings,
-        form: summarizeForm(doc || created),
+        form: summary,
       };
     },
   }),
