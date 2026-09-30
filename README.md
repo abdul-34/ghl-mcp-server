@@ -297,6 +297,13 @@ survey-builder API, using the same captured Firebase session. Questions that nee
 their own answer field get a contact custom field created with the survey, as the
 builder does. See [docs/surveys-builder-plan.md](docs/surveys-builder-plan.md).
 
+### Snippets (internal API)
+
+The `snippets_*` tools create, edit, organize and delete Marketing → Snippets:
+SMS snippets (body plus attachment URLs) and email snippets (subject plus HTML
+or plain text), and their folders, through HighLevel's internal snippets API
+with the captured Firebase session. See [docs/api-notes.md](docs/api-notes.md).
+
 ### Regenerating the tools
 
 The tools under `src/tools/generated/` are generated, not hand-edited. To refresh

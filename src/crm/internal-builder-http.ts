@@ -17,6 +17,8 @@ export interface InternalHttpConfig {
   label: string;
   /** Builds the thrown error so each client keeps its own error class. */
   makeError: (message: string, status: number) => Error;
+  /** Extra headers a product's UI sends (e.g. snippets send x-locale). */
+  extraHeaders?: Record<string, string>;
 }
 
 const DEFAULT_BASE_URL = 'https://services.leadconnectorhq.com';
@@ -27,6 +29,7 @@ export class InternalBuilderHttp {
   private readonly fetchImpl: typeof fetch;
   private readonly label: string;
   private readonly makeError: InternalHttpConfig['makeError'];
+  private readonly extraHeaders: Record<string, string>;
 
   constructor(config: InternalHttpConfig) {
     this.getIdToken = config.getIdToken;
@@ -34,6 +37,7 @@ export class InternalBuilderHttp {
     this.fetchImpl = config.fetchImpl || fetch;
     this.label = config.label;
     this.makeError = config.makeError;
+    this.extraHeaders = config.extraHeaders || {};
   }
 
   private async headers(forceRefresh: boolean): Promise<Record<string, string>> {
@@ -44,6 +48,7 @@ export class InternalBuilderHttp {
       channel: 'APP',
       source: 'WEB_USER',
       version: '2021-07-28',
+      ...this.extraHeaders,
       'token-id': token,
     };
   }

@@ -11,6 +11,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { WorkflowBuilderClient } from './workflow-builder-client.js';
 import { FormsBuilderClient } from './forms-builder-client.js';
 import { SurveysBuilderClient } from './surveys-builder-client.js';
+import { SnippetsClient } from './snippets-client.js';
 
 export interface CRMClientConfig {
   /**
@@ -44,6 +45,8 @@ export interface CRMClientConfig {
   getFormsBuilder?: () => FormsBuilderClient;
   /** Lazily resolve the internal surveys-builder client (same Firebase session). */
   getSurveysBuilder?: () => SurveysBuilderClient;
+  /** Lazily resolve the internal snippets client (same Firebase session). */
+  getSnippets?: () => SnippetsClient;
 }
 
 const DEFAULT_BASE_URL = 'https://services.leadconnectorhq.com';
@@ -64,6 +67,7 @@ export class CRMClient {
   private readonly getWorkflowBuilder?: () => WorkflowBuilderClient;
   private readonly getFormsBuilder?: () => FormsBuilderClient;
   private readonly getSurveysBuilder?: () => SurveysBuilderClient;
+  private readonly getSnippets?: () => SnippetsClient;
 
   constructor(config: CRMClientConfig) {
     if (!config.accessToken && !config.getAccessToken) {
@@ -75,6 +79,7 @@ export class CRMClient {
     this.getWorkflowBuilder = config.getWorkflowBuilder;
     this.getFormsBuilder = config.getFormsBuilder;
     this.getSurveysBuilder = config.getSurveysBuilder;
+    this.getSnippets = config.getSnippets;
 
     const headers: Record<string, string> = {
       Version: config.version || DEFAULT_VERSION,
@@ -170,6 +175,20 @@ export class CRMClient {
       );
     }
     return this.getSurveysBuilder();
+  }
+
+  /**
+   * The sibling client for GHL's internal snippets API (Marketing → Snippets), scoped
+   * to the same sub-account. Requires the captured Firebase session.
+   */
+  snippets(): SnippetsClient {
+    if (!this.getSnippets) {
+      throw new Error(
+        `Snippet tools are unavailable for location "${this.locationId}": no captured Firebase ` +
+          `credentials. Run the capture extension once on any logged-in CRM tab, or connect via a link URL.`
+      );
+    }
+    return this.getSnippets();
   }
 
   /**

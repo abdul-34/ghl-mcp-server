@@ -14,6 +14,7 @@ import { CRMClient } from './client.js';
 import { WorkflowBuilderClient } from './workflow-builder-client.js';
 import { FormsBuilderClient } from './forms-builder-client.js';
 import { SurveysBuilderClient } from './surveys-builder-client.js';
+import { SnippetsClient } from './snippets-client.js';
 import {
   ResolvedLink,
   ResolvedLocation,
@@ -66,6 +67,7 @@ export class CRMClientPool {
   private readonly workflowClients = new Map<string, WorkflowBuilderClient>();
   private readonly formsClients = new Map<string, FormsBuilderClient>();
   private readonly surveysClients = new Map<string, SurveysBuilderClient>();
+  private readonly snippetsClients = new Map<string, SnippetsClient>();
   private readonly baseUrl: string;
   private readonly version: string;
   private readonly ownerId?: string;
@@ -154,6 +156,7 @@ export class CRMClientPool {
       getWorkflowBuilder: () => this.getWorkflowClient(locationId),
       getFormsBuilder: () => this.getFormsClient(locationId),
       getSurveysBuilder: () => this.getSurveysClient(locationId),
+      getSnippets: () => this.getSnippetsClient(locationId),
     });
     this.clients.set(locationId, client);
     return client;
@@ -287,6 +290,22 @@ export class CRMClientPool {
       getIdToken: (forceRefresh) => wf.getFirebaseIdToken(forceRefresh),
     });
     this.surveysClients.set(locationId, client);
+    return client;
+  }
+
+  /** The internal snippets client; same token-id source as getFormsClient. */
+  getSnippetsClient(locationId: string): SnippetsClient {
+    const cached = this.snippetsClients.get(locationId);
+    if (cached) return cached;
+    if (!this.accounts.has(locationId)) {
+      throw new Error(`Unknown sub-account locationId "${locationId}".`);
+    }
+    const wf = this.getWorkflowClient(locationId);
+    const client = new SnippetsClient({
+      locationId,
+      getIdToken: (forceRefresh) => wf.getFirebaseIdToken(forceRefresh),
+    });
+    this.snippetsClients.set(locationId, client);
     return client;
   }
 

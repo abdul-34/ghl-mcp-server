@@ -108,3 +108,26 @@ except rename. Implemented in `src/crm/builder-folders.ts`. Status is (browser �
 | `GET /{p}/?…&parentId={folder}&type=folder[&productType=form]` = folder contents; `type=folder` without parentId = top level incl. folder rows; surveys `type=survey` = flat, all surveys | ⚠️ (browser ✅) | A1, A5, A6, B1, B5, B6. |
 | Folder delete, nested folders, pagination > 20 | ⚠️ not captured | Not implemented. |
 | `POST /forms/{id}` with `name` only → 422 `formData must be an object`; surveys accept `name` alone | ✅ (browser) | B3 rename attempt. Our forms tools always send formData. |
+
+## HighLevel internal snippets — `services.leadconnectorhq.com/snippets/{locationId}`
+
+Source: owner's capture from the web app (white-label `app.cerebrumai.io`, location `oIsICGsND5sAh4RdqGe8`), 2026-09-30.
+Every call was made from the UI and its XHR recorded. The capture's test data was deleted afterwards. Implemented in
+`src/crm/snippets-client.ts` + `src/tools/snippets.ts` (`snippets_*`). Status is (browser ✅) until this server makes the calls.
+
+| Endpoint / fact | Status | Evidence |
+|---|---|---|
+| Headers: `channel: APP`, `source: WEB_USER`, `version: 2021-07-28`, `x-locale: en_US`, `token-id`; no Bearer | ⚠️ (browser ✅) | Capture §1. A PIT/OAuth Bearer on these routes is untested, so it isn't used. |
+| Snippets and folders are one resource (Firestore `templates`); folder = `isFolder: true`; membership = `parentId` | ⚠️ (browser ✅) | §2. |
+| `GET ?skip&limit[&query]` → `{snippets[], totalCount}`; non-folders only, with `parentId` + `folderName` | ⚠️ (browser ✅) | §3.1. |
+| `GET ?all=true` → snippets + folders, **no `parentId`** | ⚠️ (browser ✅) | §3.2. There is no single-item GET: `snippets_get` combines this with the paged list. |
+| `POST /snippets/{loc}` create sms `{name, template:{body,attachments}, useForLiveChat, urlAttachments, type:"sms", isFolder:false, parentId:""}` / email `{name, template:{html,subject,attachments}, type:"email", isFolder:false, parentId:""}` → 201 snake_case `{snippet}` | ⚠️ (browser ✅) | §3.3, §3.4. |
+| `PUT /snippets/{loc}/{id}` → 200 raw Firestore snapshot (`_id` + `_data`); **template replaced, not merged** | ⚠️ (browser ✅) | §3.5. `snippets_update` reads and merges first. |
+| `DELETE /snippets/{loc}/{id}` body `{}` → `{success}`; `POST …/bulk/delete {snippetIds}` → 201 `{count}` | ⚠️ (browser ✅) | §3.6, §3.7. |
+| Folders: `GET …/folders/check?folderName`, `POST {name, isFolder:true}`, `GET …/folders/list`, `GET ?isFolder=true` (with `totalSnippets`), `PUT {name}`, `DELETE` | ⚠️ (browser ✅) | §4. |
+| `POST …/bulk/move {snippetIds, parentId}` → 201 `{count}` | ⚠️ (browser ✅) | §5.1. |
+| `parentId` in the create body places the snippet in a folder | ⚠️ inferred | UI always sends `""`. Not used: create, then bulk/move. |
+| `bulk/move` with `parentId: ""` moves back to the top level | ⚠️ inferred | Not offered. |
+| Deleting a non-empty folder (orphan vs cascade) | ⚠️ not captured | `snippets_delete_folder` refuses non-empty folders. |
+| `template.attachments` file-upload format | ⚠️ not captured | Always `[]`; SMS attachments go in `urlAttachments`. |
+| Ported `get_snippets` / `create_snippet` / `update_snippet` / `delete_snippet` (`/templates/snippets`, Bearer, `shortcut`/`content`) | ⚠️ unverified | Path and fields don't match this capture. Left in place pending an owner decision. |

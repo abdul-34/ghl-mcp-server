@@ -27,6 +27,7 @@ import { workflowInsightsTools } from './workflow-insights.js';
 import { portedTools } from './ported/index.js';
 import { formsBuilderTools } from './forms-builder.js';
 import { surveysBuilderTools } from './surveys-builder.js';
+import { snippetsTools } from './snippets.js';
 import {
   gatewayToolDefinitions,
   isGatewayTool,
@@ -47,6 +48,7 @@ const OPERATION_DEFS: ToolDef[] = [
   ...portedTools,
   ...formsBuilderTools,
   ...surveysBuilderTools,
+  ...snippetsTools,
 ];
 
 const REGISTRY = new Map<string, ToolDef>();

@@ -1,10 +1,25 @@
 // Hand-written catalog for tools NOT emitted by generate-tools.mjs
 // (workflow-builder, workflow public/insights, forms and surveys builders, and the ported categories).
 // Merged into TOOL_CATALOG so the dashboard link tool-picker can whitelist them.
-// Keep in sync with src/tools/workflow-*.ts, src/tools/forms-builder.ts, src/tools/surveys-builder.ts and src/tools/ported/*.
+// Keep in sync with src/tools/workflow-*.ts, src/tools/forms-builder.ts, src/tools/surveys-builder.ts, src/tools/snippets.ts and src/tools/ported/*.
 import type { ToolGroup } from "./tools-catalog";
 
 export const MANUAL_TOOL_CATALOG: ToolGroup[] = [
+  {
+    "category": "Snippets",
+    "tools": [
+      "snippets_list",
+      "snippets_get",
+      "snippets_create",
+      "snippets_update",
+      "snippets_delete",
+      "snippets_list_folders",
+      "snippets_create_folder",
+      "snippets_rename_folder",
+      "snippets_delete_folder",
+      "snippets_move_to_folder"
+    ]
+  },
   {
     "category": "Surveys Builder",
     "tools": [
